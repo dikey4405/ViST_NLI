@@ -39,18 +39,27 @@ def extract_and_save_features(
 
 
 def extract_split_features(dataloader: Any, encoder: SonarEncoder) -> list[dict[str, Any]]:
-    """Extract feature dictionaries for one DataLoader split."""
-
     results: list[dict[str, Any]] = []
+
+    print(">>> Starting DataLoader iteration...", flush=True)
+
     with torch.no_grad():
-        for batch in dataloader:
+        for batch_idx, batch in enumerate(dataloader):
+
+            print(f">>> Batch {batch_idx}: loaded", flush=True)
+
             batch_features = extract_batch_features(batch, encoder)
+
+            print(f">>> Batch {batch_idx}: encoded", flush=True)
+
             batch_size = len(batch["ids"])
+
             for index in range(batch_size):
                 sample_features = {
                     mode: mode_features[index].detach().cpu()
                     for mode, mode_features in batch_features.items()
                 }
+
                 results.append(
                     NLIFeatureSample(
                         id=batch["ids"][index],
@@ -59,17 +68,22 @@ def extract_split_features(dataloader: Any, encoder: SonarEncoder) -> list[dict[
                         features=sample_features,
                     ).to_dict()
                 )
+
     return results
 
 
-def extract_batch_features(batch: dict[str, Any], encoder: SonarEncoder) -> dict[str, torch.Tensor]:
-    """Build [batch_size, 4096] features for each input mode in a batch."""
+def extract_batch_features(batch, encoder):
+    print("    Building input pairs...", flush=True)
 
     input_pairs = build_batch_input_pairs(batch)
-    features: dict[str, torch.Tensor] = {}
-    embedding_cache: dict[tuple[str, str, tuple[str, ...]], torch.Tensor] = {}
+
+    features = {}
+    embedding_cache = {}
 
     for mode, pair_batch in input_pairs.items():
+
+        print(f"    Mode {mode}: premise", flush=True)
+
         premise_embeddings = _get_or_encode_values(
             encoder,
             cache=embedding_cache,
@@ -77,6 +91,9 @@ def extract_batch_features(batch: dict[str, Any], encoder: SonarEncoder) -> dict
             values=pair_batch["premise"],
             modality=pair_batch["premise_modality"][0],
         )
+
+        print(f"    Mode {mode}: hypothesis", flush=True)
+
         hypothesis_embeddings = _get_or_encode_values(
             encoder,
             cache=embedding_cache,
@@ -84,8 +101,19 @@ def extract_batch_features(batch: dict[str, Any], encoder: SonarEncoder) -> dict
             values=pair_batch["hypothesis"],
             modality=pair_batch["hypothesis_modality"][0],
         )
-        mode_features = build_pair_feature(premise_embeddings, hypothesis_embeddings)
-        validate_feature_shape(mode_features, name=f"{mode} feature")
+
+        print(f"    Mode {mode}: done", flush=True)
+
+        mode_features = build_pair_feature(
+            premise_embeddings,
+            hypothesis_embeddings,
+        )
+
+        validate_feature_shape(
+            mode_features,
+            name=f"{mode} feature",
+        )
+
         features[mode] = mode_features
 
     return features
@@ -105,12 +133,35 @@ def _get_or_encode_values(
     return cache[cache_key]
 
 
-def _encode_values(encoder: SonarEncoder, *, values: list[str], modality: str) -> torch.Tensor:
+def _encode_values(
+    encoder: SonarEncoder,
+    *,
+    values: list[str],
+    modality: str,
+) -> torch.Tensor:
+
+    print(
+        f"        Encoding {modality}, n={len(values)}...",
+        flush=True,
+    )
+
     if modality == ModalityType.TEXT.value:
-        return encoder.encode_text(values)
-    if modality == ModalityType.SPEECH.value:
-        return encoder.encode_speech(values)
-    raise ValueError(f"Unsupported modality: {modality}")
+        result = encoder.encode_text(values)
+
+    elif modality == ModalityType.SPEECH.value:
+        result = encoder.encode_speech(values)
+
+    else:
+        raise ValueError(
+            f"Unsupported modality: {modality}"
+        )
+
+    print(
+        f"        Finished {modality}: {result.shape}",
+        flush=True,
+    )
+
+    return result
 
 
 def parse_args() -> argparse.Namespace:
