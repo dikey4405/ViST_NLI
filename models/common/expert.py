@@ -49,3 +49,15 @@ class NLIClassifier(nn.Module):
 
     def forward(self, fused: torch.Tensor) -> torch.Tensor:
         return self.net(fused)
+
+
+class ModeNLIHead(NLIClassifier):
+    """Shared NLI evidence head applied identically to every modality mode."""
+
+    def forward(self, mode_embeddings: torch.Tensor) -> torch.Tensor:
+        if mode_embeddings.ndim != 3:
+            raise ValueError(
+                "mode_embeddings must have shape [B, M, H], "
+                f"got {tuple(mode_embeddings.shape)}."
+            )
+        return super().forward(mode_embeddings)

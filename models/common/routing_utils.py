@@ -6,9 +6,6 @@ import torch
 from torch import nn
 
 
-MODE_NAMES = ("text_text", "text_speech", "speech_text", "speech_speech")
-
-
 def validate_feature_tensor(
     features: torch.Tensor,
     *,
@@ -34,11 +31,12 @@ def combine_topk_expert_outputs(
 
     output = torch.zeros_like(x)
     for expert_id, expert in enumerate(experts):
-        expert_weight = (topk_indices == expert_id).to(dtype=x.dtype) * topk_weights
-        expert_weight = expert_weight.sum(dim=-1, keepdim=True)
-        if torch.count_nonzero(expert_weight).item() == 0:
+        rows, slots = torch.where(topk_indices == expert_id)
+        if rows.numel() == 0:
             continue
-        output = output + expert(x) * expert_weight
+        expert_output = expert(x.index_select(0, rows))
+        weights = topk_weights[rows, slots].unsqueeze(-1)
+        output = output.index_add(0, rows, expert_output * weights)
     return output
 
 
@@ -65,16 +63,27 @@ def compute_routing_statistics(
     for mode_idx in range(num_modes):
         mode_flat = topk_indices[:, mode_idx, :].reshape(-1)
         mode_counts.append(torch.bincount(mode_flat, minlength=num_experts).to(router_probs.device))
-    expert_usage_by_mode = torch.stack(mode_counts, dim=0)
+    expert_counts_by_mode = torch.stack(mode_counts, dim=0)
+    expert_usage_by_mode = expert_counts_by_mode.float()
+    expert_usage_by_mode = expert_usage_by_mode / expert_usage_by_mode.sum(
+        dim=1,
+        keepdim=True,
+    ).clamp_min(1)
 
-    entropy = -(router_probs * router_probs.clamp_min(1e-12).log()).sum(dim=-1).mean()
+    entropy_by_sample_mode = -(
+        router_probs * router_probs.clamp_min(1e-12).log()
+    ).sum(dim=-1)
+    entropy = entropy_by_sample_mode.mean()
+    entropy_by_mode = entropy_by_sample_mode.mean(dim=0)
     unused_experts = (expert_counts == 0).sum()
     return {
         "batch_size": batch_size,
         "expert_counts": expert_counts.detach().cpu(),
         "expert_usage": expert_usage.detach().cpu(),
+        "expert_counts_by_mode": expert_counts_by_mode.detach().cpu(),
         "expert_usage_by_mode": expert_usage_by_mode.detach().cpu(),
         "router_entropy": entropy.detach().cpu(),
+        "router_entropy_by_mode": entropy_by_mode.detach().cpu(),
         "unused_experts": unused_experts.detach().cpu(),
         "avg_topk_weight": topk_weights.mean().detach().cpu(),
     }

@@ -5,50 +5,99 @@ import torch.nn.functional as F
 from torch import nn
 
 
-class ContrastiveProjectionHead(nn.Module):
-    """Projection head shared by all models before contrastive loss."""
+class PairAlignmentProjection(nn.Module):
+    """Shared trainable NLI adapter for premise and hypothesis embeddings."""
 
-    def __init__(self, hidden_dim: int, contrastive_hidden_dim: int, contrastive_dim: int) -> None:
+    def __init__(self, embedding_dim: int, alignment_hidden_dim: int, dropout: float) -> None:
         super().__init__()
         self.net = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, contrastive_hidden_dim),
+            nn.LayerNorm(embedding_dim),
+            nn.Linear(embedding_dim, alignment_hidden_dim),
             nn.GELU(),
-            nn.Linear(contrastive_hidden_dim, contrastive_dim),
+            nn.Dropout(dropout),
+            nn.Linear(alignment_hidden_dim, embedding_dim),
+        )
+        self.output_norm = nn.LayerNorm(embedding_dim)
+
+    def forward(self, embeddings: torch.Tensor) -> torch.Tensor:
+        return self.output_norm(embeddings + self.net(embeddings))
+
+
+class NLIRelationContrastiveLoss(nn.Module):
+    """Pull entailment pairs together and separate contradiction pairs by a margin."""
+
+    def __init__(
+        self,
+        *,
+        margin: float = 0.5,
+        entailment_label_id: int = 0,
+        contradiction_label_id: int = 2,
+    ) -> None:
+        super().__init__()
+        if margin <= 0 or margin > 2:
+            raise ValueError(f"margin must be in (0, 2], got {margin}.")
+        if entailment_label_id == contradiction_label_id:
+            raise ValueError("Entailment and contradiction label ids must be different.")
+        self.margin = margin
+        self.entailment_label_id = entailment_label_id
+        self.contradiction_label_id = contradiction_label_id
+
+    def forward(
+        self,
+        premise_embeddings: torch.Tensor,
+        hypothesis_embeddings: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> torch.Tensor:
+        stats = self.loss_statistics(premise_embeddings, hypothesis_embeddings, labels)
+        return (
+            stats["entailment_sum"] / stats["entailment_count"].clamp_min(1)
+            + stats["contradiction_sum"] / stats["contradiction_count"].clamp_min(1)
         )
 
-    def forward(self, mode_embeddings: torch.Tensor) -> torch.Tensor:
-        return self.net(mode_embeddings)
+    def loss_statistics(
+        self,
+        premise_embeddings: torch.Tensor,
+        hypothesis_embeddings: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Return additive class-wise sums and counts for batch-independent reporting."""
+
+        _validate_relation_inputs(premise_embeddings, hypothesis_embeddings, labels)
+
+        cosine_distance = 1.0 - F.cosine_similarity(
+            premise_embeddings,
+            hypothesis_embeddings,
+            dim=-1,
+        )
+        entailment_mask = labels.eq(self.entailment_label_id).unsqueeze(-1)
+        contradiction_mask = labels.eq(self.contradiction_label_id).unsqueeze(-1)
+        entailment_mask = entailment_mask.expand_as(cosine_distance)
+        contradiction_mask = contradiction_mask.expand_as(cosine_distance)
+        contradiction_penalty = F.relu(self.margin - cosine_distance).square()
+        return {
+            "entailment_sum": (cosine_distance.square() * entailment_mask).sum(),
+            "entailment_count": entailment_mask.sum(),
+            "contradiction_sum": (contradiction_penalty * contradiction_mask).sum(),
+            "contradiction_count": contradiction_mask.sum(),
+        }
 
 
-class MultiViewContrastiveLoss(nn.Module):
-    """Multi-positive NT-Xent loss over four modality views of each sample."""
-
-    def __init__(self, temperature: float = 0.07) -> None:
-        super().__init__()
-        if temperature <= 0:
-            raise ValueError(f"temperature must be positive, got {temperature}.")
-        self.temperature = temperature
-
-    def forward(self, mode_embeddings: torch.Tensor) -> torch.Tensor:
-        if mode_embeddings.ndim != 3:
-            raise ValueError(f"mode_embeddings must have shape [B, M, D], got {tuple(mode_embeddings.shape)}")
-
-        batch_size, num_modes, _ = mode_embeddings.shape
-        if batch_size < 2 or num_modes < 2:
-            return mode_embeddings.sum() * 0.0
-
-        flat = F.normalize(mode_embeddings.reshape(batch_size * num_modes, -1), p=2, dim=-1)
-        logits = torch.matmul(flat, flat.transpose(0, 1)) / self.temperature
-
-        num_views = batch_size * num_modes
-        eye = torch.eye(num_views, dtype=torch.bool, device=mode_embeddings.device)
-        sample_ids = torch.arange(batch_size, device=mode_embeddings.device).repeat_interleave(num_modes)
-        positive_mask = sample_ids.unsqueeze(0).eq(sample_ids.unsqueeze(1)) & ~eye
-
-        logits = logits.masked_fill(eye, torch.finfo(logits.dtype).min)
-        log_probs = logits - torch.logsumexp(logits, dim=1, keepdim=True)
-
-        positive_counts = positive_mask.sum(dim=1).clamp_min(1)
-        positive_log_probs = log_probs.masked_fill(~positive_mask, 0.0).sum(dim=1) / positive_counts
-        return -positive_log_probs.mean()
+def _validate_relation_inputs(
+    premise_embeddings: torch.Tensor,
+    hypothesis_embeddings: torch.Tensor,
+    labels: torch.Tensor,
+) -> None:
+    if premise_embeddings.ndim != 3:
+        raise ValueError(
+            "premise_embeddings must have shape [B, M, D], "
+            f"got {tuple(premise_embeddings.shape)}."
+        )
+    if premise_embeddings.shape != hypothesis_embeddings.shape:
+        raise ValueError(
+            "Premise and hypothesis embeddings must have the same shape, "
+            f"got {tuple(premise_embeddings.shape)} and {tuple(hypothesis_embeddings.shape)}."
+        )
+    if labels.ndim != 1 or labels.shape[0] != premise_embeddings.shape[0]:
+        raise ValueError(
+            f"labels must have shape [{premise_embeddings.shape[0]}], got {tuple(labels.shape)}."
+        )

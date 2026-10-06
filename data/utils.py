@@ -18,6 +18,30 @@ AUDIO_SIDE_CONFIG: dict[str, tuple[str, str]] = {
 AudioIndex = dict[tuple[str, str, str], str]
 
 
+def resolve_audio_root(data_path: str | Path, audio_root: str | Path | None = None) -> Path:
+    """Locate a split's audio root, supporting current and legacy layouts."""
+
+    if audio_root is not None:
+        return Path(audio_root)
+    path = Path(data_path)
+    split_audio = path.parent / f"{path.stem}_audio"
+    return split_audio if split_audio.is_dir() else path.parent
+
+
+def resolve_audio_directory(audio_root: str | Path, side: str) -> Path:
+    """Resolve one audio side without guessing individual WAV filenames."""
+
+    legacy_folder, _ = _get_audio_side_config(side)
+    root = Path(audio_root)
+    candidates = (root / f"{side}_audio", root / legacy_folder)
+    existing = [path for path in candidates if path.is_dir()]
+    if len(existing) > 1:
+        raise ValueError(f"Ambiguous {side} audio directories: {existing}")
+    if not existing:
+        raise FileNotFoundError(f"Missing {side} audio directory. Checked: {candidates}")
+    return existing[0]
+
+
 def read_json_or_jsonl(path: str | Path) -> list[dict[str, Any]]:
     """Read NLI samples from a JSON list, a {'data': [...]} JSON object, or JSONL."""
 
@@ -114,10 +138,7 @@ def build_audio_index(
     label_set = set(labels)
 
     for side in sides:
-        folder, _ = _get_audio_side_config(side)
-        audio_dir = Path(split_dir) / folder
-        if not audio_dir.exists():
-            raise FileNotFoundError(f"Expected {side} audio directory does not exist: {audio_dir}")
+        audio_dir = resolve_audio_directory(split_dir, side)
 
         for wav_path in sorted(audio_dir.glob("*.wav")):
             sample_id, label = parse_audio_filename(side, wav_path.name, label_set)

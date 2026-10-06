@@ -13,6 +13,7 @@ from .utils import (
     parse_input_mode,
     read_json_or_jsonl,
     resolve_audio_path,
+    resolve_audio_root,
     validate_raw_nli_record,
 )
 
@@ -32,7 +33,7 @@ class NLIMultimodalDataset(Dataset):
     ) -> None:
         self.data_path = Path(data_path)
         self.input_mode = parse_input_mode(input_mode)
-        self.audio_root = Path(audio_root) if audio_root is not None else self.data_path.parent
+        self.audio_root = resolve_audio_root(self.data_path, audio_root)
         self.label_mapping = label_mapping
         self.validate_audio_exists = validate_audio_exists
         self.allow_ambiguous_audio = allow_ambiguous_audio
@@ -182,12 +183,12 @@ class NLIMultimodalDataset(Dataset):
 
         ambiguous_sides: list[str] = []
         if (
-            self.input_mode.premise_modality == ModalityType.SPEECH
+            "premise" in self.speech_sides
             and self.integrity_report["num_duplicate_groups_with_varied_premise"] > 0
         ):
             ambiguous_sides.append("premise")
         if (
-            self.input_mode.hypothesis_modality == ModalityType.SPEECH
+            "hypothesis" in self.speech_sides
             and self.integrity_report["num_duplicate_groups_with_varied_hypothesis"] > 0
         ):
             ambiguous_sides.append("hypothesis")
@@ -196,7 +197,8 @@ class NLIMultimodalDataset(Dataset):
             sides = ", ".join(ambiguous_sides)
             raise ValueError(
                 "Ambiguous speech mapping detected for side(s): "
-                f"{sides}. Some duplicated (id, label) groups contain different text but share the same derived WAV path. "
+                f"{sides}. Some duplicated (id, label) groups contain different text "
+                "but share the same derived WAV path. "
                 "Set allow_ambiguous_audio=True to keep loading the raw data, or deduplicate/fix the audio filenames."
             )
 

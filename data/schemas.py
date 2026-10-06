@@ -37,6 +37,8 @@ _INPUT_MODE_MODALITIES: dict[InputMode, tuple[ModalityType, ModalityType]] = {
     InputMode.SPEECH_SPEECH: (ModalityType.SPEECH, ModalityType.SPEECH),
 }
 
+INPUT_MODE_NAMES = tuple(mode.value for mode in InputMode)
+
 
 RawInputValue = str | Path
 

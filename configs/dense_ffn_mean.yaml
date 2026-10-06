@@ -1,0 +1,37 @@
+model_name: dense_ffn_mean
+input_dim: 4096
+num_modes: 4
+hidden_dim: 1024
+expert_ffn_dim: 2048
+num_labels: 3
+dropout: 0.2
+
+use_relation_contrastive_loss: false
+relation_contrastive_margin: 0.5
+relation_contrastive_loss_coef: 0.0
+use_mode_auxiliary_loss: false
+mode_auxiliary_loss_coef: 0.0
+use_invariance_loss: false
+invariance_loss_coef: 0.0
+reliability_weighted_invariance: false
+aux_loss_coef: 0.0
+
+seed: 42
+batch_size: 16
+num_workers: 0
+num_epochs: 15
+learning_rate: 0.0001
+weight_decay: 0.01
+patience: 3
+
+feature_source: sonar
+feature_sources:
+  sonar:
+    train: data_sonar_features/train.pt
+    dev: data_sonar_features/dev.pt
+    test: data_sonar_features/test.pt
+  phobert_xlsr:
+    train: outputs/phobert_xlsr_features/train.pt
+    dev: outputs/phobert_xlsr_features/dev.pt
+    test: outputs/phobert_xlsr_features/test.pt
+output_dir: outputs/dense_ffn_mean/{feature_source}

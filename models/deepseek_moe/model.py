@@ -1,17 +1,9 @@
 from __future__ import annotations
 
-import torch
-from torch import nn
-
-from ..common.contrastive import ContrastiveProjectionHead
-from ..common.expert import FeedForwardExpert, InputProjection, NLIClassifier
-from ..common.losses import compute_load_balancing_loss
-from ..common.pooling import MeanModePooling
-from ..common.router import TopKRouter
-from ..common.routing_utils import combine_topk_expert_outputs, reshape_router_tensor, validate_feature_tensor
+from ..common.base_model import RoutedMoENLIModel
 
 
-class DeepSeekMoENLIModel(nn.Module):
+class DeepSeekMoENLIModel(RoutedMoENLIModel):
     """DeepSeek-style MoE with routed experts plus always-on shared experts."""
 
     def __init__(
@@ -26,84 +18,40 @@ class DeepSeekMoENLIModel(nn.Module):
         expert_ffn_dim: int = 1024,
         num_labels: int = 3,
         dropout: float = 0.2,
-        use_contrastive_loss: bool = True,
-        contrastive_hidden_dim: int = 512,
-        contrastive_dim: int = 256,
+        use_relation_contrastive_loss: bool = True,
+        alignment_hidden_dim: int = 512,
+        use_mode_evidence: bool = False,
+        use_reliability_routing: bool = False,
+        use_reliability_fusion: bool = False,
+        reliability_estimator: str = "entropy",
+        detach_reliability_for_routing: bool = True,
+        detach_reliability_for_fusion: bool = True,
+        mode_embedding_dim: int = 32,
+        reliability_embedding_dim: int = 16,
+        routing_strategy: str | None = None,
     ) -> None:
-        super().__init__()
         if num_shared_experts < 1:
             raise ValueError("DeepSeekMoENLIModel requires at least one shared expert.")
 
-        self.input_dim = input_dim
-        self.num_modes = num_modes
-        self.hidden_dim = hidden_dim
-        self.num_routed_experts = num_routed_experts
-        self.num_shared_experts = num_shared_experts
-        self.routed_top_k = routed_top_k
-        self.use_contrastive_loss = use_contrastive_loss
-
-        self.input_projection = InputProjection(input_dim, hidden_dim, dropout)
-        self.router = TopKRouter(hidden_dim, num_routed_experts, routed_top_k)
-        self.routed_experts = nn.ModuleList(
-            [FeedForwardExpert(hidden_dim, expert_ffn_dim, dropout) for _ in range(num_routed_experts)]
+        super().__init__(
+            input_dim=input_dim,
+            num_modes=num_modes,
+            hidden_dim=hidden_dim,
+            num_routed_experts=num_routed_experts,
+            routed_top_k=routed_top_k,
+            expert_ffn_dim=expert_ffn_dim,
+            num_labels=num_labels,
+            dropout=dropout,
+            use_relation_contrastive_loss=use_relation_contrastive_loss,
+            alignment_hidden_dim=alignment_hidden_dim,
+            num_shared_experts=num_shared_experts,
+            use_mode_evidence=use_mode_evidence,
+            use_reliability_routing=use_reliability_routing,
+            use_reliability_fusion=use_reliability_fusion,
+            reliability_estimator=reliability_estimator,
+            detach_reliability_for_routing=detach_reliability_for_routing,
+            detach_reliability_for_fusion=detach_reliability_for_fusion,
+            mode_embedding_dim=mode_embedding_dim,
+            reliability_embedding_dim=reliability_embedding_dim,
+            routing_strategy=routing_strategy,
         )
-        self.shared_experts = nn.ModuleList(
-            [FeedForwardExpert(hidden_dim, expert_ffn_dim, dropout) for _ in range(num_shared_experts)]
-        )
-        self.output_norm = nn.LayerNorm(hidden_dim)
-        self.mode_pooling = MeanModePooling()
-        self.classifier = NLIClassifier(hidden_dim, num_labels, dropout)
-        self.contrastive_head = (
-            ContrastiveProjectionHead(hidden_dim, contrastive_hidden_dim, contrastive_dim)
-            if use_contrastive_loss
-            else None
-        )
-
-    def forward(self, features: torch.Tensor) -> dict[str, torch.Tensor]:
-        batch_size, num_modes = validate_feature_tensor(
-            features,
-            input_dim=self.input_dim,
-            num_modes=self.num_modes,
-        )
-
-        projected = self.input_projection(features)
-        flat = projected.reshape(batch_size * num_modes, self.hidden_dim)
-        routing = self.router(flat)
-        routed_flat = combine_topk_expert_outputs(
-            flat,
-            self.routed_experts,
-            routing["topk_indices"],
-            routing["topk_weights"],
-        )
-        shared_flat = torch.zeros_like(flat)
-        for shared_expert in self.shared_experts:
-            shared_flat = shared_flat + shared_expert(flat)
-
-        moe_flat = self.output_norm(routed_flat + shared_flat)
-        routed_output = routed_flat.reshape(batch_size, num_modes, self.hidden_dim)
-        shared_output = shared_flat.reshape(batch_size, num_modes, self.hidden_dim)
-        moe_output = moe_flat.reshape(batch_size, num_modes, self.hidden_dim)
-        fused = self.mode_pooling(moe_output)
-        logits = self.classifier(fused)
-
-        load_balancing_loss = compute_load_balancing_loss(
-            routing["router_probs"],
-            routing["topk_indices"],
-            self.num_routed_experts,
-        )
-
-        output = {
-            "logits": logits,
-            "fused": fused,
-            "moe_output": moe_output,
-            "router_logits": reshape_router_tensor(routing["router_logits"], batch_size, num_modes),
-            "router_probs": reshape_router_tensor(routing["router_probs"], batch_size, num_modes),
-            "topk_indices": reshape_router_tensor(routing["topk_indices"], batch_size, num_modes),
-            "topk_weights": reshape_router_tensor(routing["topk_weights"], batch_size, num_modes),
-            "load_balancing_loss": load_balancing_loss,
-            "routed_output": routed_output,
-            "shared_output": shared_output,
-        }
-        if self.contrastive_head is not None:
-            output["contrastive_embeddings"] = self.contrastive_head(moe_output)
-        return output

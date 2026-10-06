@@ -1,0 +1,74 @@
+pipeline_name: phobert_xlsr
+seed: 42
+device: auto
+mixed_precision: true
+
+data:
+  raw_data_dir: Dataset
+  split_files:
+    train: train.json
+    dev: dev.json
+    test: test.json
+  num_workers: 0
+  pin_memory: false
+  validate_audio_exists: true
+  allow_ambiguous_audio: true
+  missing_audio_policy: raise
+
+text_encoder:
+  model_name: vinai/phobert-large
+  max_length: 256
+  pooling: masked_mean
+  batch_size: 16
+  freeze: true
+  use_word_segmentation: true
+  cache_segmented_text: true
+
+speech_encoder:
+  model_name: facebook/wav2vec2-xls-r-300m
+  target_sample_rate: 16000
+  max_audio_seconds: 30
+  overlength_policy: truncate
+  pooling: masked_mean
+  batch_size: 4
+  freeze: true
+
+projector:
+  input_dim: 1024
+  hidden_dim: 1024
+  output_dim: 1024
+  activation: gelu
+  dropout: 0.1
+
+alignment:
+  enabled: true
+  temperature: 0.07
+  batch_size: 64
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  epochs: 20
+  patience: 5
+
+pair_feature:
+  components:
+    - u
+    - v
+    - abs_diff
+    - product
+  output_dim: 4096
+
+cache:
+  directory: caches/phobert_xlsr
+  shard_size: 1000
+  dtype: float32
+  overwrite: false
+
+checkpoint:
+  directory: checkpoints/phobert_xlsr_alignment
+  save_best_only: true
+
+output:
+  directory: outputs/phobert_xlsr_features
+  dtype: float32
+  save_metadata: true
+  overwrite: false

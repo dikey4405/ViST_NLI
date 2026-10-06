@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from KLTN.source.training.trainer import run_training_from_config
+from .train import main
+
+
+CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "deepseek_moe.yaml"
 
 
 if __name__ == "__main__":
-    run_training_from_config(Path("KLTN/source/configs/deepseek_moe.yaml"))
+    main(default_config=CONFIG_PATH)
