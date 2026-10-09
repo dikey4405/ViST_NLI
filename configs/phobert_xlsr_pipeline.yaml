@@ -68,7 +68,7 @@ checkpoint:
   save_best_only: true
 
 output:
-  directory: outputs/phobert_xlsr_features
+  directory: Features/phobert_xlmr
   dtype: float32
   save_metadata: true
   overwrite: false

@@ -46,7 +46,7 @@ feature_sources:
     dev: Features/sonar/dev.pt
     test: Features/sonar/test.pt
   phobert_xlsr:
-    train: outputs/phobert_xlsr_features/train.pt
-    dev: outputs/phobert_xlsr_features/dev.pt
-    test: outputs/phobert_xlsr_features/test.pt
+    train: Features/phobert_xlmr/train.pt
+    dev: Features/phobert_xlmr/dev.pt
+    test: Features/phobert_xlmr/test.pt
 output_dir: outputs/conventional_moe_counterfactual_utility/{feature_source}
