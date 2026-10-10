@@ -7,7 +7,7 @@ num_shared_experts: 1
 routed_top_k: 3
 expert_ffn_dim: 1024
 num_labels: 3
-dropout: 0.5
+dropout: 0.3
 
 use_relation_contrastive_loss: true
 alignment_hidden_dim: 512
@@ -36,7 +36,7 @@ batch_size: 16
 num_workers: 0
 num_epochs: 50
 learning_rate: 0.0001
-weight_decay: 0.01
+weight_decay: 0.03
 patience: 5
 
 feature_source: sonar
