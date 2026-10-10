@@ -35,7 +35,7 @@ seed: 42
 batch_size: 16
 num_workers: 0
 num_epochs: 50
-learning_rate: 0.00001
+learning_rate: 0.001
 weight_decay: 0.01
 patience: 5
 
