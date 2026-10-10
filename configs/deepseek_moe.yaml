@@ -35,8 +35,8 @@ seed: 42
 batch_size: 16
 num_workers: 0
 num_epochs: 50
-learning_rate: 0.0001
-weight_decay: 0.04
+learning_rate: 0.00001
+weight_decay: 0.01
 patience: 5
 
 feature_source: sonar
