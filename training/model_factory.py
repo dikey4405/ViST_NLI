@@ -40,11 +40,25 @@ DENSE_FULL_MODEL_KWARGS = COMMON_MODEL_KWARGS + (
     "reliability_embedding_dim",
 )
 
+MOE_MODEL_NAMES = {
+    "conventional_moe",
+    "fine_grained_moe",
+    "deepseek_moe",
+}
+
 
 def build_model(config: dict[str, Any]) -> nn.Module:
     """Instantiate exactly one model architecture from config."""
 
     model_name = config["model_name"]
+    fusion_modality_dropout_enabled = bool(
+        config.get("fusion_modality_dropout_enabled", False)
+    )
+    if fusion_modality_dropout_enabled and model_name not in MOE_MODEL_NAMES:
+        raise ValueError(
+            "fusion_modality_dropout_enabled is supported only for MoE models, "
+            f"got model_name={model_name!r}."
+        )
     if model_name in {
         "dense_ffn_mean",
         "dense_ffn_attention",
@@ -102,14 +116,27 @@ def build_model(config: dict[str, Any]) -> nn.Module:
     if model_name == "conventional_moe":
         from ..models.conventional_moe.model import ConventionalMoENLIModel
 
-        return ConventionalMoENLIModel(**kwargs)
-    if model_name == "fine_grained_moe":
+        model = ConventionalMoENLIModel(**kwargs)
+    elif model_name == "fine_grained_moe":
         from ..models.fine_grained_moe.model import FineGrainedMoENLIModel
 
-        return FineGrainedMoENLIModel(**kwargs)
-    if model_name == "deepseek_moe":
+        model = FineGrainedMoENLIModel(**kwargs)
+    elif model_name == "deepseek_moe":
         from ..models.deepseek_moe.model import DeepSeekMoENLIModel
 
-        return DeepSeekMoENLIModel(**kwargs)
+        model = DeepSeekMoENLIModel(**kwargs)
+    else:
+        raise ValueError(f"Unsupported model_name: {model_name}")
 
-    raise ValueError(f"Unsupported model_name: {model_name}")
+    if fusion_modality_dropout_enabled:
+        from ..models.common.fusion_modality_dropout import (
+            register_fusion_modality_dropout,
+        )
+
+        register_fusion_modality_dropout(
+            model.mode_pooling,
+            num_modes=model.num_modes,
+            drop_tt_prob=float(config.get("fusion_drop_tt_prob", 0.0)),
+            drop_tt_st_prob=float(config.get("fusion_drop_tt_st_prob", 0.0)),
+        )
+    return model

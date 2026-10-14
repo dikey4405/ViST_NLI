@@ -1,0 +1,56 @@
+model_name: conventional_moe
+input_dim: 4096
+num_modes: 4
+hidden_dim: 1024
+num_routed_experts: 4
+num_shared_experts: 0
+routed_top_k: 2
+expert_ffn_dim: 2048
+num_labels: 3
+dropout: 0.2
+
+use_relation_contrastive_loss: true
+alignment_hidden_dim: 512
+relation_contrastive_margin: 0.5
+relation_contrastive_loss_coef: 0.1
+
+routing_strategy: counterfactual_utility
+use_reliability_routing: false
+use_reliability_fusion: true
+reliability_estimator: entropy
+detach_reliability_for_fusion: true
+mode_embedding_dim: 32
+reliability_embedding_dim: 16
+
+use_mode_auxiliary_loss: true
+mode_auxiliary_loss_coef: 0.2
+use_invariance_loss: true
+invariance_loss_coef: 0.1
+reliability_weighted_invariance: false
+counterfactual_routing_loss_coef: 0.1
+
+aux_loss_coef: 0.01
+
+fusion_modality_dropout_enabled: true
+fusion_drop_tt_prob: 0.30
+fusion_drop_tt_st_prob: 0.10
+
+seed: 42
+batch_size: 16
+num_workers: 0
+num_epochs: 50
+learning_rate: 0.0001
+weight_decay: 0.01
+patience: 5
+
+feature_source: sonar
+feature_sources:
+  sonar:
+    train: Features/sonar/train.pt
+    dev: Features/sonar/dev.pt
+    test: Features/sonar/test.pt
+  phobert_xlsr:
+    train: Features/phobert_xlmr/train.pt
+    dev: Features/phobert_xlmr/dev.pt
+    test: Features/phobert_xlmr/test.pt
+output_dir: outputs/conventional_moe_fusion_dropout/{feature_source}
