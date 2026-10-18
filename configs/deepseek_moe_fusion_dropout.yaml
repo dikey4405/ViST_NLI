@@ -16,7 +16,7 @@ relation_contrastive_loss_coef: 0.1
 
 routing_strategy: counterfactual_utility
 use_reliability_routing: false
-use_reliability_fusion: true
+use_reliability_fusion: false
 reliability_estimator: entropy
 detach_reliability_for_fusion: true
 mode_embedding_dim: 32
