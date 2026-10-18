@@ -23,7 +23,7 @@ mode_embedding_dim: 32
 reliability_embedding_dim: 16
 
 use_mode_auxiliary_loss: true
-mode_auxiliary_loss_coef: 0.2
+mode_auxiliary_loss_coef: 0.1
 use_invariance_loss: true
 invariance_loss_coef: 0.1
 reliability_weighted_invariance: false
@@ -32,7 +32,7 @@ counterfactual_routing_loss_coef: 0.1
 aux_loss_coef: 0.01
 
 fusion_modality_dropout_enabled: true
-fusion_drop_tt_prob: 0.10
+fusion_drop_tt_prob: 0.00
 fusion_drop_tt_st_prob: 0.00
 
 seed: 42
