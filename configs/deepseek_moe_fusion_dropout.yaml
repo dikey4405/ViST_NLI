@@ -31,7 +31,7 @@ counterfactual_routing_loss_coef: 0.1
 
 aux_loss_coef: 0.01
 
-fusion_modality_dropout_enabled: true
+fusion_modality_dropout_enabled: false
 fusion_drop_tt_prob: 0.00
 fusion_drop_tt_st_prob: 0.00
 
