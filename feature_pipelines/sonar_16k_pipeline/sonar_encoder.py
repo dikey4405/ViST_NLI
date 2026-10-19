@@ -7,7 +7,9 @@ import torch
 from .config import FullSonar16kConfig
 
 
-def resolve_device(value: str) -> torch.device:
+def resolve_device(value: str | torch.device) -> torch.device:
+    if isinstance(value, torch.device):
+        return value
     if value == "auto":
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if value == "cuda" and not torch.cuda.is_available():

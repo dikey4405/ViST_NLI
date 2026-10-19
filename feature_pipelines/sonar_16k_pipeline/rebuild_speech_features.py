@@ -21,7 +21,7 @@ from .resample_audio import (
     load_split_dataset,
     publish_temp_file,
 )
-from .schemas import NLIFeatureSample
+from ..sonar_feature_pipeline.schemas import NLIFeatureSample
 from .sonar_encoder import resolve_device
 
 
