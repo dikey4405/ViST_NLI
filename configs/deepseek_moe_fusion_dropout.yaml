@@ -46,9 +46,9 @@ patience: 5
 feature_source: sonar
 feature_sources:
   sonar:
-    train: Features/sonar/train.pt
-    dev: Features/sonar/dev.pt
-    test: Features/sonar/test.pt
+    train: Features/sonar_16k/train.pt
+    dev: Features/sonar_16k/dev.pt
+    test: Features/sonar_16k/test.pt
   phobert_xlsr:
     train: Features/phobert_xlmr/train.pt
     dev: Features/phobert_xlmr/dev.pt
