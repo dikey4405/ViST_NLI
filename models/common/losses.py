@@ -28,6 +28,8 @@ def compute_load_balancing_loss(
 def compute_mode_auxiliary_loss(
     mode_logits: torch.Tensor,
     labels: torch.Tensor,
+    *,
+    label_smoothing: float = 0.0,
 ) -> torch.Tensor:
     """Average supervised NLI cross entropy over all modes of each sample."""
 
@@ -39,8 +41,13 @@ def compute_mode_auxiliary_loss(
         raise ValueError(
             f"labels must have shape [{mode_logits.shape[0]}], got {tuple(labels.shape)}."
         )
+    if not 0.0 <= label_smoothing < 1.0:
+        raise ValueError(
+            f"label_smoothing must be in [0, 1), got {label_smoothing}."
+        )
     expanded_labels = labels.unsqueeze(1).expand(-1, mode_logits.shape[1])
     return F.cross_entropy(
         mode_logits.reshape(-1, mode_logits.shape[-1]),
         expanded_labels.reshape(-1),
+        label_smoothing=label_smoothing,
     )

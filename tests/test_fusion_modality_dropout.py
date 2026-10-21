@@ -325,10 +325,15 @@ class TestFusionModalityDropout(unittest.TestCase):
             "fine_grained_moe": (23_122_878, 64),
             "deepseek_moe": (25_222_078, 68),
         }
-        expected_differences = {
+        common_differences = {
             "fusion_modality_dropout_enabled",
             "fusion_drop_tt_prob",
             "fusion_drop_tt_st_prob",
+            "label_smoothing",
+            "scheduler_name",
+            "scheduler_warmup_ratio",
+            "scheduler_min_learning_rate",
+            "feature_sources",
             "output_dir",
         }
 
@@ -344,7 +349,29 @@ class TestFusionModalityDropout(unittest.TestCase):
                     for key in all_keys
                     if baseline_config.get(key) != experiment_config.get(key)
                 }
+                expected_differences = set(common_differences)
+                if model_name == "deepseek_moe":
+                    expected_differences.update(
+                        {"dropout", "learning_rate", "patience"}
+                    )
                 self.assertEqual(actual_differences, expected_differences)
+                self.assertEqual(experiment_config["label_smoothing"], 0.05)
+                self.assertEqual(
+                    experiment_config["scheduler_name"],
+                    "cosine_with_warmup",
+                )
+                self.assertEqual(
+                    experiment_config["scheduler_warmup_ratio"],
+                    0.05,
+                )
+                self.assertEqual(
+                    experiment_config["scheduler_min_learning_rate"],
+                    0.000001,
+                )
+                sonar_paths = experiment_config["feature_sources"]["sonar"]
+                self.assertTrue(
+                    all("Features/sonar_16k/" in path for path in sonar_paths.values())
+                )
 
                 baseline = build_model(baseline_config)
                 experiment = build_model(experiment_config)

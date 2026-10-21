@@ -9,7 +9,7 @@ from unittest.mock import patch
 import numpy as np
 import soundfile as sf
 
-from KLTN.source.feature_pipelines.sonar_feature_pipeline.resample_audio import (
+from KLTN.source.feature_pipelines.sonar_16k_pipeline.resample_audio import (
     collect_audio_jobs,
     load_split_dataset,
     resample_wav,
@@ -76,7 +76,7 @@ class SonarAudioResamplingTests(unittest.TestCase):
         sf.write(self.source, np.zeros(480), 48_000)
         original_bytes = self.source.read_bytes()
         with patch(
-            "KLTN.source.feature_pipelines.sonar_feature_pipeline.resample_audio.sf.write",
+            "KLTN.source.feature_pipelines.sonar_16k_pipeline.resample_audio.sf.write",
             side_effect=OSError("interrupted"),
         ):
             with self.assertRaisesRegex(OSError, "interrupted"):
@@ -111,7 +111,8 @@ class SonarAudioResamplingTests(unittest.TestCase):
             dataset, split_root, self.root / "Dataset_resampled_16k" / "train_audio"
         )
         self.assertEqual(len(jobs), 2)
-        self.assertNotEqual(jobs[("premise", shared)], jobs[("hypothesis", shared)])
+        source = shared.resolve(strict=True)
+        self.assertNotEqual(jobs[("premise", source)], jobs[("hypothesis", source)])
 
     def test_collision_and_audio_outside_declared_root(self) -> None:
         raw_root = self.root / "Dataset"

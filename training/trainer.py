@@ -24,6 +24,7 @@ from .logging_utils import (
 )
 from .model_factory import build_model
 from .metrics import EpochMetrics, summarize_mode_values
+from .schedulers import build_lr_scheduler, resolve_scheduler_name
 from .utils import Timer, count_parameters, load_yaml_config, resolve_path, set_random_seed
 
 
@@ -51,6 +52,7 @@ def compute_training_losses(
     reliability_weighted_invariance: bool = False,
     counterfactual_routing_loss_coef: float = 0.0,
     use_counterfactual_routing_loss: bool = False,
+    label_smoothing: float = 0.0,
 ) -> dict[str, torch.Tensor]:
     """Compute final, routing, relation, mode, and invariance objectives."""
 
@@ -74,8 +76,16 @@ def compute_training_losses(
             "counterfactual_routing_loss_coef must be non-negative, "
             f"got {counterfactual_routing_loss_coef}."
         )
+    if not 0.0 <= label_smoothing < 1.0:
+        raise ValueError(
+            f"label_smoothing must be in [0, 1), got {label_smoothing}."
+        )
 
-    classification_loss = F.cross_entropy(outputs["logits"], labels)
+    classification_loss = F.cross_entropy(
+        outputs["logits"],
+        labels,
+        label_smoothing=label_smoothing,
+    )
     if "load_balancing_loss" in outputs:
         load_balancing_loss = outputs["load_balancing_loss"]
     elif aux_loss_coef > 0:
@@ -107,7 +117,11 @@ def compute_training_losses(
             raise ValueError(
                 "Mode auxiliary loss is enabled, but model output is missing mode_logits."
             )
-        mode_auxiliary_loss = compute_mode_auxiliary_loss(outputs["mode_logits"], labels)
+        mode_auxiliary_loss = compute_mode_auxiliary_loss(
+            outputs["mode_logits"],
+            labels,
+            label_smoothing=label_smoothing,
+        )
     else:
         mode_auxiliary_loss = differentiable_zero(outputs["logits"])
 
@@ -251,6 +265,18 @@ class Trainer:
             lr=float(config["learning_rate"]),
             weight_decay=float(config["weight_decay"]),
         )
+        self.label_smoothing = float(config.get("label_smoothing", 0.0))
+        if not 0.0 <= self.label_smoothing < 1.0:
+            raise ValueError(
+                "label_smoothing must be in [0, 1), "
+                f"got {self.label_smoothing}."
+            )
+        self.scheduler_name = resolve_scheduler_name(config)
+        self.scheduler = build_lr_scheduler(
+            self.optimizer,
+            config,
+            steps_per_epoch=len(self.train_loader),
+        )
         self.relation_contrastive_criterion = NLIRelationContrastiveLoss(
             margin=float(config.get("relation_contrastive_margin", 0.5)),
             entailment_label_id=DEFAULT_LABEL_MAPPING["entailment"],
@@ -282,6 +308,15 @@ class Trainer:
             patience,
             SELECTION_METRIC,
             SELECTION_MODE,
+        )
+        self.logger.info(
+            "OPTIMIZATION | optimizer=AdamW | scheduler=%s | "
+            "warmup_ratio=%.6f | min_learning_rate=%.6f | "
+            "label_smoothing=%.6f",
+            self.scheduler_name,
+            float(self.config.get("scheduler_warmup_ratio", 0.0)),
+            float(self.config.get("scheduler_min_learning_rate", 0.0)),
+            self.label_smoothing,
         )
         self.logger.info(
             "PARAMETERS | total=%d | trainable=%d",
@@ -455,6 +490,7 @@ class Trainer:
                     use_counterfactual_routing_loss=(
                         self.use_counterfactual_routing_loss
                     ),
+                    label_smoothing=self.label_smoothing,
                 )
                 if not all(torch.isfinite(value).all() for value in losses.values()):
                     raise FloatingPointError("Non-finite training/evaluation loss detected.")
@@ -462,6 +498,8 @@ class Trainer:
                     self.optimizer.zero_grad(set_to_none=True)
                     losses["total_loss"].backward()
                     self.optimizer.step()
+                    if self.scheduler is not None:
+                        self.scheduler.step()
 
             metrics.update(outputs, labels, losses)
 
@@ -565,6 +603,11 @@ class Trainer:
                 "selection_mode": SELECTION_MODE,
                 "model_state_dict": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
+                "scheduler_state_dict": (
+                    self.scheduler.state_dict()
+                    if self.scheduler is not None
+                    else None
+                ),
                 "config": self.config,
             },
             self.output_dir / file_name,

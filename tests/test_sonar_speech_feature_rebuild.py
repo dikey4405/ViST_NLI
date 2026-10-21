@@ -11,7 +11,7 @@ import soundfile as sf
 import torch
 
 from KLTN.source.data.schemas import INPUT_MODE_NAMES, InputMode
-from KLTN.source.feature_pipelines.sonar_feature_pipeline.rebuild_speech_features import (
+from KLTN.source.feature_pipelines.sonar_16k_pipeline.rebuild_speech_features import (
     prepare_split,
     rebuild_split,
     run_rebuild,
@@ -142,7 +142,7 @@ class SonarSpeechFeatureRebuildTests(unittest.TestCase):
         del self.old_rows[0]["sample_index"]
         torch.save(self.old_rows, self.old_feature_root / "train.pt")
         with patch(
-            "KLTN.source.feature_pipelines.sonar_feature_pipeline.rebuild_speech_features.load_speech_pipeline"
+            "KLTN.source.feature_pipelines.sonar_16k_pipeline.rebuild_speech_features.load_speech_pipeline"
         ) as load_model:
             with self.assertRaisesRegex(ValueError, "sample_index"):
                 run_rebuild(
@@ -174,7 +174,7 @@ class SonarSpeechFeatureRebuildTests(unittest.TestCase):
         output_path.unlink()
 
         with patch(
-            "KLTN.source.feature_pipelines.sonar_feature_pipeline.rebuild_speech_features.torch.save",
+            "KLTN.source.feature_pipelines.sonar_16k_pipeline.rebuild_speech_features.torch.save",
             side_effect=OSError("interrupted"),
         ):
             with self.assertRaisesRegex(OSError, "interrupted"):
@@ -185,7 +185,7 @@ class SonarSpeechFeatureRebuildTests(unittest.TestCase):
     def test_run_rebuild_does_not_initialize_text_encoder(self) -> None:
         fake = FakeSpeechPipeline()
         with patch(
-            "KLTN.source.feature_pipelines.sonar_feature_pipeline.rebuild_speech_features.load_speech_pipeline",
+            "KLTN.source.feature_pipelines.sonar_16k_pipeline.rebuild_speech_features.load_speech_pipeline",
             return_value=fake,
         ), patch(
             "KLTN.source.feature_pipelines.sonar_feature_pipeline.sonar_encoder.SonarEncoder.__init__",

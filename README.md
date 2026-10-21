@@ -3,7 +3,7 @@ Vietnamese Text-Speech Multimodal Natural Language Inference
 
 ## Pipeline boundaries
 
-Both feature pipelines save the same per-sample interface: four ordered
+All feature pipelines save the same per-sample interface: four ordered
 `4096`-dimensional pair features for `text_text`, `text_speech`, `speech_text`,
 and `speech_speech`. They do not train an MoE classifier.
 
@@ -65,6 +65,22 @@ The default raw dataset is `KLTN/Dataset/{train,dev,test}.json`. Each split
 uses `<split>_audio/premise_audio` and `<split>_audio/hypothesis_audio`.
 The shared data loader also supports the older split-local
 `Premise`/`Hypothesis` folders and explicit per-record audio paths.
+
+To prepare WAVs for the independent SONAR 16 kHz pipeline, run from the
+directory containing `KLTN`:
+
+```powershell
+python -m KLTN.source.feature_pipelines.sonar_16k_pipeline.resample_audio --splits train dev test
+python -m KLTN.source.feature_pipelines.sonar_16k_pipeline.extract_features --splits train dev test --device cuda
+```
+
+The first command writes `KLTN/Dataset_resampled_16k` without changing the
+original audio. Use `--resume` on the resampling command to validate and skip
+completed WAVs after an interruption. The second command writes fresh text and
+speech features to `KLTN/Features/sonar_full_16k`; it does not read old `.pt`
+features. The separate `sonar_16k_pipeline.rebuild_speech_features` script is
+available only for the legacy speech-only rebuild workflow; full extraction
+does not import it or read old `.pt` files.
 
 PhoBERT/XLS-R manifests record a fingerprint of the source JSON and encoder
 preprocessing settings. Speech fingerprints include WAV contents; text
@@ -143,6 +159,15 @@ use append mode, and a unique `run_id` identifies each training invocation.
 The test report includes the selected epoch, selection metric and score, feature
 source, and number of test samples. Test results do not participate in checkpoint
 selection or early stopping.
+
+The shared trainer uses AdamW. Training configs may enable an optimizer-step
+cosine schedule with `scheduler_name: cosine_with_warmup`; `learning_rate` is
+the peak rate, while `scheduler_warmup_ratio` and
+`scheduler_min_learning_rate` control warmup and the final rate. Set
+`scheduler_name: none` (the default when the key is absent) to keep a fixed
+learning rate. `label_smoothing` controls both the final NLI cross-entropy and
+the per-mode auxiliary cross-entropy and defaults to `0.0`. Counterfactual
+utility targets continue to use hard-label cross-entropy.
 
 Run the core tests from the directory containing `KLTN`:
 

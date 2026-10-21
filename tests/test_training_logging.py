@@ -207,6 +207,14 @@ class TestTrainerLogging(unittest.TestCase):
             self.assertNotIn("best_dev_loss", test_report)
             self.assertTrue((output_dir / "test_metrics.json").is_file())
 
+            checkpoint = torch.load(
+                output_dir / "best_model.pt",
+                map_location="cpu",
+                weights_only=False,
+            )
+            self.assertIn("scheduler_state_dict", checkpoint)
+            self.assertIsNone(checkpoint["scheduler_state_dict"])
+
             second_trainer = _build_trainer(feature_path, output_dir, num_epochs=1)
             second_run_id = second_trainer.run_id
             try:
@@ -218,6 +226,40 @@ class TestTrainerLogging(unittest.TestCase):
             self.assertEqual(len(all_records), 3)
             self.assertNotEqual(first_run_id, second_run_id)
             self.assertEqual(all_records[-1]["run_id"], second_run_id)
+
+    def test_scheduler_steps_only_for_training_and_is_checkpointed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            feature_path = root / "features.pt"
+            output_dir = root / "output"
+            torch.save(_feature_payload(), feature_path)
+            trainer = _build_trainer(
+                feature_path,
+                output_dir,
+                num_epochs=2,
+                use_scheduler=True,
+            )
+            self.assertIsNotNone(trainer.scheduler)
+            initial_step = trainer.scheduler.last_epoch
+            try:
+                trainer._run_epoch(training=False)
+                self.assertEqual(trainer.scheduler.last_epoch, initial_step)
+                trainer.train()
+            finally:
+                trainer.close()
+
+            checkpoint = torch.load(
+                output_dir / "best_model.pt",
+                map_location="cpu",
+                weights_only=False,
+            )
+            log_text = (output_dir / "train.log").read_text(encoding="utf-8")
+
+        self.assertIsNotNone(checkpoint["scheduler_state_dict"])
+        self.assertIn("scheduler=cosine_with_warmup", log_text)
+        self.assertIn("warmup_ratio=0.250000", log_text)
+        self.assertIn("min_learning_rate=0.000001", log_text)
+        self.assertIn("label_smoothing=0.050000", log_text)
 
     def test_higher_macro_f1_wins_even_when_dev_loss_is_worse(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -328,6 +370,7 @@ def _build_trainer(
     *,
     num_epochs: int,
     patience: int = 3,
+    use_scheduler: bool = False,
 ) -> Trainer:
     config = {
         "model_name": "dense_ffn_mean",
@@ -350,6 +393,15 @@ def _build_trainer(
         "num_epochs": num_epochs,
         "patience": patience,
     }
+    if use_scheduler:
+        config.update(
+            {
+                "label_smoothing": 0.05,
+                "scheduler_name": "cosine_with_warmup",
+                "scheduler_warmup_ratio": 0.25,
+                "scheduler_min_learning_rate": 1e-6,
+            }
+        )
     loader = build_feature_loader(feature_path, config, shuffle=False)
     model = DenseFFNMeanNLIModel(
         input_dim=16,
