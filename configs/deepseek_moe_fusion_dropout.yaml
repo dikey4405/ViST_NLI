@@ -24,8 +24,8 @@ reliability_embedding_dim: 16
 
 use_mode_auxiliary_loss: true
 mode_auxiliary_loss_coef: 0.2
-use_invariance_loss: false
-invariance_loss_coef: 0.0
+use_invariance_loss: true
+invariance_loss_coef: 0.1
 reliability_weighted_invariance: false
 counterfactual_routing_loss_coef: 0.1
 
@@ -40,7 +40,7 @@ batch_size: 16
 num_workers: 0
 num_epochs: 50
 learning_rate: 0.00005
-weight_decay: 0.01
+weight_decay: 0.03
 patience: 7
 
 feature_source: sonar
