@@ -9,6 +9,46 @@ from KLTN.source.models.common.contrastive import NLIRelationContrastiveLoss
 from KLTN.source.models.common.losses import compute_mode_auxiliary_loss
 from KLTN.source.training.schedulers import build_lr_scheduler
 from KLTN.source.training.trainer import compute_training_losses
+from KLTN.source.training.utils import load_yaml_config
+
+
+TRAINING_CONFIG_NAMES = (
+    "conventional_moe.yaml",
+    "conventional_moe_fusion_dropout.yaml",
+    "fine_grained_moe.yaml",
+    "fine_grained_moe_fusion_dropout.yaml",
+    "deepseek_moe.yaml",
+    "deepseek_moe_fusion_dropout.yaml",
+    "dense_ffn_mean.yaml",
+    "dense_ffn_attention.yaml",
+    "dense_ffn_full.yaml",
+)
+
+
+class TestTrainingConfigAlignment(unittest.TestCase):
+    def test_training_configs_share_optimization_and_feature_sources(self) -> None:
+        reference = load_yaml_config("deepseek_moe_fusion_dropout.yaml")
+        shared_keys = (
+            "seed",
+            "batch_size",
+            "num_workers",
+            "num_epochs",
+            "learning_rate",
+            "weight_decay",
+            "label_smoothing",
+            "scheduler_name",
+            "scheduler_warmup_ratio",
+            "scheduler_min_learning_rate",
+            "patience",
+            "feature_source",
+            "feature_sources",
+        )
+        for name in TRAINING_CONFIG_NAMES:
+            with self.subTest(config=name):
+                config = load_yaml_config(name)
+                for key in shared_keys:
+                    self.assertEqual(config[key], reference[key], key)
+
 
 
 class TestLabelSmoothing(unittest.TestCase):

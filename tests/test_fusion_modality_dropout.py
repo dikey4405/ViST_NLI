@@ -329,11 +329,6 @@ class TestFusionModalityDropout(unittest.TestCase):
             "fusion_modality_dropout_enabled",
             "fusion_drop_tt_prob",
             "fusion_drop_tt_st_prob",
-            "label_smoothing",
-            "scheduler_name",
-            "scheduler_warmup_ratio",
-            "scheduler_min_learning_rate",
-            "feature_sources",
             "output_dir",
         }
 
@@ -351,18 +346,17 @@ class TestFusionModalityDropout(unittest.TestCase):
                 }
                 expected_differences = set(common_differences)
                 if model_name == "deepseek_moe":
-                    expected_differences.update(
-                        {"dropout", "learning_rate", "patience"}
-                    )
+                    expected_differences.add("dropout")
+                    expected_differences.add("detach_utility_from_input_projection")
                 self.assertEqual(actual_differences, expected_differences)
-                self.assertEqual(experiment_config["label_smoothing"], 0.05)
+                self.assertEqual(experiment_config["label_smoothing"], 0.0)
                 self.assertEqual(
                     experiment_config["scheduler_name"],
                     "cosine_with_warmup",
                 )
                 self.assertEqual(
                     experiment_config["scheduler_warmup_ratio"],
-                    0.05,
+                    0.03,
                 )
                 self.assertEqual(
                     experiment_config["scheduler_min_learning_rate"],

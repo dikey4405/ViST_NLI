@@ -4,7 +4,7 @@ num_modes: 4
 hidden_dim: 1024
 num_routed_experts: 8
 num_shared_experts: 1
-routed_top_k: 2
+routed_top_k: 3
 expert_ffn_dim: 1024
 num_labels: 3
 dropout: 0.3
@@ -28,6 +28,7 @@ use_invariance_loss: true
 invariance_loss_coef: 0.1
 reliability_weighted_invariance: false
 counterfactual_routing_loss_coef: 0.1
+detach_utility_from_input_projection: true
 
 aux_loss_coef: 0.01
 

@@ -315,6 +315,32 @@ class RoutedMoENLIModel(nn.Module):
             output["aligned_hypothesis_embeddings"] = aligned_hypothesis
         return output
 
+    def compute_counterfactual_router_logits(
+        self,
+        pre_moe_output: torch.Tensor,
+        *,
+        detach_input: bool = False,
+    ) -> torch.Tensor:
+        """Reuse the router for utility supervision without rerunning the backbone."""
+
+        if self.routing_strategy != "counterfactual_utility":
+            raise ValueError(
+                "Counterfactual router logits require counterfactual_utility routing."
+            )
+        batch_size, num_modes = validate_feature_tensor(
+            pre_moe_output,
+            input_dim=self.hidden_dim,
+            num_modes=self.num_modes,
+        )
+        projected = pre_moe_output.detach() if detach_input else pre_moe_output
+        flat = projected.reshape(batch_size * num_modes, self.hidden_dim)
+        _, mode_condition = self._build_mode_condition(batch_size, projected.device)
+        routing = self.router(
+            flat,
+            mode_condition.reshape(batch_size * num_modes, -1),
+        )
+        return reshape_router_tensor(routing["router_logits"], batch_size, num_modes)
+
     @torch.no_grad()
     def build_counterfactual_utility_targets(
         self,

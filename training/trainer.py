@@ -53,6 +53,7 @@ def compute_training_losses(
     counterfactual_routing_loss_coef: float = 0.0,
     use_counterfactual_routing_loss: bool = False,
     label_smoothing: float = 0.0,
+    counterfactual_router_logits: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Compute final, routing, relation, mode, and invariance objectives."""
 
@@ -158,11 +159,15 @@ def compute_training_losses(
                 "Counterfactual routing loss is enabled, but model output is missing: "
                 f"{', '.join(sorted(missing_keys))}."
             )
-        predicted_utility = outputs["router_logits"]
+        predicted_utility = (
+            outputs["router_logits"]
+            if counterfactual_router_logits is None
+            else counterfactual_router_logits
+        )
         target_utility = outputs["counterfactual_utility_targets"]
         if predicted_utility.shape != target_utility.shape:
             raise ValueError(
-                "router_logits and counterfactual_utility_targets must have the "
+                "Counterfactual router logits and counterfactual_utility_targets must have the "
                 f"same shape, got {tuple(predicted_utility.shape)} and "
                 f"{tuple(target_utility.shape)}."
             )
@@ -226,6 +231,18 @@ class Trainer:
         self.dev_loader = dev_loader
         self.config = config
         self.routing_strategy = getattr(model, "routing_strategy", None)
+        self.detach_utility_from_input_projection = config.get(
+            "detach_utility_from_input_projection", False
+        )
+        if not isinstance(self.detach_utility_from_input_projection, bool):
+            raise ValueError("detach_utility_from_input_projection must be a boolean.")
+        if (
+            self.detach_utility_from_input_projection
+            and self.routing_strategy != "counterfactual_utility"
+        ):
+            raise ValueError(
+                "detach_utility_from_input_projection requires counterfactual_utility routing."
+            )
         self.counterfactual_routing_loss_coef = float(
             config.get("counterfactual_routing_loss_coef", 0.0)
         )
@@ -312,11 +329,12 @@ class Trainer:
         self.logger.info(
             "OPTIMIZATION | optimizer=AdamW | scheduler=%s | "
             "warmup_ratio=%.6f | min_learning_rate=%.6f | "
-            "label_smoothing=%.6f",
+            "label_smoothing=%.6f | detach_utility_from_input_projection=%s",
             self.scheduler_name,
             float(self.config.get("scheduler_warmup_ratio", 0.0)),
             float(self.config.get("scheduler_min_learning_rate", 0.0)),
             self.label_smoothing,
+            str(self.detach_utility_from_input_projection).lower(),
         )
         self.logger.info(
             "PARAMETERS | total=%d | trainable=%d",
@@ -443,6 +461,7 @@ class Trainer:
             labels = batch["labels"].to(self.device)
             with torch.set_grad_enabled(training):
                 outputs = self.model(features)
+                counterfactual_router_logits = None
                 if self.use_counterfactual_routing_loss:
                     target_builder = getattr(
                         self.model,
@@ -457,6 +476,18 @@ class Trainer:
                         features,
                         labels,
                     )
+                    if training and self.detach_utility_from_input_projection:
+                        logits_builder = getattr(
+                            self.model, "compute_counterfactual_router_logits", None
+                        )
+                        if not callable(logits_builder):
+                            raise TypeError(
+                                "Detached utility supervision requires "
+                                "compute_counterfactual_router_logits on the model."
+                            )
+                        counterfactual_router_logits = logits_builder(
+                            outputs["pre_moe_output"], detach_input=True
+                        )
                 losses = compute_training_losses(
                     outputs,
                     labels,
@@ -491,6 +522,7 @@ class Trainer:
                         self.use_counterfactual_routing_loss
                     ),
                     label_smoothing=self.label_smoothing,
+                    counterfactual_router_logits=counterfactual_router_logits,
                 )
                 if not all(torch.isfinite(value).all() for value in losses.values()):
                     raise FloatingPointError("Non-finite training/evaluation loss detected.")

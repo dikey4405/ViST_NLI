@@ -28,6 +28,7 @@ use_invariance_loss: true
 invariance_loss_coef: 0.1
 reliability_weighted_invariance: false
 counterfactual_routing_loss_coef: 0.1
+detach_utility_from_input_projection: false
 
 aux_loss_coef: 0.01
 

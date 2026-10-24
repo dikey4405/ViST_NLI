@@ -4,10 +4,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.utils.data import DataLoader
 
 from KLTN.source.data.schemas import INPUT_MODE_NAMES
 from KLTN.source.models.common.contrastive import NLIRelationContrastiveLoss
@@ -330,7 +332,272 @@ class TestCounterfactualUtilityTargets(unittest.TestCase):
             self.assertTrue(torch.isfinite(torch.tensor(report[key])))
 
 
+class TestUtilityGradientIsolation(unittest.TestCase):
+    def setUp(self) -> None:
+        torch.manual_seed(42)
+
+    def test_utility_only_gradient_with_detach_enabled_disabled_and_omitted(self) -> None:
+        for detach in (None, False, True):
+            for name, model in _utility_models().items():
+                with self.subTest(model=name, detach=detach):
+                    features = _dummy_features(3).requires_grad_()
+                    labels = torch.tensor([0, 1, 2])
+                    outputs = model(features)
+                    outputs["pre_moe_output"].retain_grad()
+                    targets = model.build_counterfactual_utility_targets(features, labels)
+                    outputs["counterfactual_utility_targets"] = targets
+                    override = None
+                    if detach is True:
+                        override = model.compute_counterfactual_router_logits(
+                            outputs["pre_moe_output"], detach_input=True
+                        )
+                    elif detach is False:
+                        override = model.compute_counterfactual_router_logits(
+                            outputs["pre_moe_output"]
+                        )
+                    losses = _utility_losses(outputs, labels, override)
+                    losses["counterfactual_routing_loss"].backward()
+
+                    self.assertTrue(_has_gradient(model.router))
+                    self.assertTrue(_has_gradient(model.mode_embedding))
+                    self.assertEqual(_has_gradient(model.input_projection), detach is not True)
+                    if detach is True:
+                        self.assertIsNone(features.grad)
+                        self.assertIsNone(outputs["pre_moe_output"].grad)
+                        self.assertTrue(all(p.grad is None for p in model.input_projection.parameters()))
+                    for module in (
+                        model.routed_experts, model.shared_experts, model.mode_pooling,
+                        model.classifier, model.mode_nli_head,
+                    ):
+                        self.assertTrue(all(p.grad is None for p in module.parameters()))
+                    self.assertFalse(targets.requires_grad)
+
+    def test_classification_gradient_still_reaches_backbone_router_and_experts(self) -> None:
+        for name, model in _utility_models().items():
+            with self.subTest(model=name):
+                model.routed_top_k = model.router.top_k = 2
+                outputs = model(_dummy_features(3))
+                outputs["counterfactual_utility_targets"] = torch.zeros_like(outputs["router_logits"])
+                override = model.compute_counterfactual_router_logits(
+                    outputs["pre_moe_output"], detach_input=True
+                )
+                losses = _utility_losses(outputs, torch.tensor([0, 1, 2]), override)
+                losses["classification_loss"].backward()
+                for module in (
+                    model.input_projection, model.router, model.mode_embedding,
+                    model.mode_pooling, model.classifier,
+                ):
+                    self.assertTrue(_has_gradient(module))
+                for expert_id in outputs["topk_indices"].unique().tolist():
+                    self.assertTrue(_has_gradient(model.routed_experts[expert_id]))
+                for expert in model.shared_experts:
+                    self.assertTrue(_has_gradient(expert))
+
+    def test_total_loss_preserves_other_gradients_at_input_projection(self) -> None:
+        for name, model in _utility_models().items():
+            with self.subTest(model=name):
+                features = _dummy_features(3)
+                labels = torch.tensor([0, 1, 2])
+                outputs = model(features)
+                outputs["counterfactual_utility_targets"] = (
+                    model.build_counterfactual_utility_targets(features, labels)
+                )
+                override = model.compute_counterfactual_router_logits(
+                    outputs["pre_moe_output"], detach_input=True
+                )
+                losses = _utility_losses(outputs, labels, override)
+                parameters = tuple(model.input_projection.parameters())
+                actual = torch.autograd.grad(losses["total_loss"], parameters, retain_graph=True)
+                expected = torch.autograd.grad(
+                    losses["total_loss"] - losses["weighted_counterfactual_routing_loss"],
+                    parameters,
+                    retain_graph=True,
+                )
+                for actual_gradient, expected_gradient in zip(actual, expected):
+                    torch.testing.assert_close(actual_gradient, expected_gradient, rtol=0, atol=0)
+                losses["total_loss"].backward()
+                self.assertTrue(_has_gradient(model.mode_nli_head))
+                self.assertTrue(_has_gradient(model.input_projection))
+                self.assertTrue(_has_gradient(model.router))
+
+    def test_helper_preserves_values_rng_forward_and_state_dict(self) -> None:
+        for name, model in _utility_models().items():
+            with self.subTest(model=name):
+                for module in model.modules():
+                    if isinstance(module, nn.Dropout):
+                        module.p = 0.3
+                features = _dummy_features(3)
+                labels = torch.tensor([0, 1, 2])
+                rng_before_forward = torch.get_rng_state()
+                outputs = model(features)
+                keys = set(outputs)
+                state = {key: value.clone() for key, value in model.state_dict().items()}
+                parameter_count = sum(p.numel() for p in model.parameters())
+                rng_before_helper = torch.get_rng_state()
+                detached = model.compute_counterfactual_router_logits(
+                    outputs["pre_moe_output"], detach_input=True
+                )
+                attached = model.compute_counterfactual_router_logits(outputs["pre_moe_output"])
+                self.assertTrue(torch.equal(rng_before_helper, torch.get_rng_state()))
+                for logits in (detached, attached):
+                    torch.testing.assert_close(logits, outputs["router_logits"], rtol=0, atol=0)
+
+                outputs["counterfactual_utility_targets"] = (
+                    model.build_counterfactual_utility_targets(features, labels)
+                )
+                baseline_losses = _utility_losses(outputs, labels)
+                detached_losses = _utility_losses(outputs, labels, detached)
+                for key in baseline_losses:
+                    torch.testing.assert_close(baseline_losses[key], detached_losses[key], rtol=0, atol=0)
+                self.assertEqual(parameter_count, sum(p.numel() for p in model.parameters()))
+                self.assertEqual(list(state), list(model.state_dict()))
+                for key, value in model.state_dict().items():
+                    torch.testing.assert_close(value, state[key], rtol=0, atol=0)
+                model.load_state_dict(state, strict=True)
+                torch.set_rng_state(rng_before_forward)
+                repeated = model(features)
+                self.assertEqual(set(repeated), keys)
+                for key in keys:
+                    torch.testing.assert_close(repeated[key], outputs[key], rtol=0, atol=0)
+
+    def test_helper_and_loss_reject_invalid_shapes_and_strategy(self) -> None:
+        model = _utility_models()["deepseek"]
+        for shape in ((2, 8), (2, 3, 8), (2, 4, 7)):
+            with self.subTest(shape=shape):
+                with self.assertRaises(ValueError):
+                    model.compute_counterfactual_router_logits(torch.zeros(shape), detach_input=True)
+        legacy = ConventionalMoENLIModel(**_model_kwargs())
+        with self.assertRaisesRegex(ValueError, "counterfactual_utility"):
+            legacy.compute_counterfactual_router_logits(torch.zeros(2, 4, 8))
+        outputs = model(_dummy_features(2))
+        outputs["counterfactual_utility_targets"] = torch.zeros_like(outputs["router_logits"])
+        with self.assertRaisesRegex(ValueError, "same shape"):
+            _utility_losses(outputs, torch.tensor([0, 2]), torch.zeros(2, 4, 1))
+
+    def test_yaml_defaults_enable_only_deepseek_fusion(self) -> None:
+        for name in ("conventional_moe", "fine_grained_moe", "deepseek_moe"):
+            for suffix in ("", "_fusion_dropout"):
+                filename = f"{name}{suffix}.yaml"
+                config = load_yaml_config(filename)
+                self.assertIs(
+                    config["detach_utility_from_input_projection"],
+                    filename == "deepseek_moe_fusion_dropout.yaml",
+                )
+        for name in ("dense_ffn_mean", "dense_ffn_attention", "dense_ffn_full"):
+            self.assertNotIn("detach_utility_from_input_projection", load_yaml_config(f"{name}.yaml"))
+
+
 class TestCounterfactualTrainerIntegration(unittest.TestCase):
+    def test_detached_helper_runs_only_for_enabled_training_with_positive_coefficient(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            features = _dummy_features(3)
+            loader = DataLoader(
+                [{"features": features[i], "labels": i} for i in range(3)], batch_size=3
+            )
+            for flag in (None, False, True):
+                for coefficient in (0.0, 0.1):
+                    for name, model in _utility_models().items():
+                        with self.subTest(model=name, flag=flag, coefficient=coefficient):
+                            config = _trainer_config()
+                            config["counterfactual_routing_loss_coef"] = coefficient
+                            if flag is not None:
+                                config["detach_utility_from_input_projection"] = flag
+                            trainer = Trainer(
+                                model=model, train_loader=loader, dev_loader=loader,
+                                config=config, output_dir=directory,
+                            )
+                            try:
+                                with patch.object(
+                                    model, "compute_counterfactual_router_logits",
+                                    wraps=model.compute_counterfactual_router_logits,
+                                ) as helper:
+                                    trainer._run_epoch(training=True)
+                                    self.assertEqual(helper.call_count, int(flag is True and coefficient > 0))
+                                    if helper.called:
+                                        self.assertIs(helper.call_args.kwargs["detach_input"], True)
+                                    helper.reset_mock()
+                                    trainer._run_epoch(training=False)
+                                    trainer._run_epoch(training=False, loader=loader)
+                                    model(features.to(trainer.device))
+                                    model.build_counterfactual_utility_targets(
+                                        features.to(trainer.device), torch.arange(3, device=trainer.device)
+                                    )
+                                    helper.assert_not_called()
+                            finally:
+                                trainer.close()
+
+    def test_invalid_detach_configuration_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            loader = DataLoader([])
+            for value in ("true", "false", 0, 1, None):
+                config = _trainer_config()
+                config["detach_utility_from_input_projection"] = value
+                with self.subTest(value=value):
+                    with self.assertRaisesRegex(ValueError, "must be a boolean"):
+                        Trainer(
+                            model=_utility_models()["conventional"], train_loader=loader,
+                            dev_loader=None, config=config, output_dir=directory,
+                        )
+            for name in ("conventional_moe", "dense_ffn_mean"):
+                config = {
+                    **_trainer_config(), **_model_kwargs(), "model_name": name,
+                    "routing_strategy": "topk", "counterfactual_routing_loss_coef": 0.0,
+                    "detach_utility_from_input_projection": True,
+                }
+                with self.subTest(model=name):
+                    with self.assertRaisesRegex(ValueError, "requires counterfactual_utility"):
+                        Trainer(
+                            model=build_model(config), train_loader=loader, dev_loader=None,
+                            config=config, output_dir=directory,
+                        )
+
+    def test_enabled_flag_logging_checkpoint_and_legacy_evaluation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            feature_path = root / "features.pt"
+            torch.save(_feature_payload(), feature_path)
+            config = _trainer_config()
+            config["detach_utility_from_input_projection"] = True
+            loader = build_feature_loader(feature_path, config, shuffle=False)
+            model = _utility_models()["conventional"]
+            state_keys = list(model.state_dict())
+            parameter_count = sum(p.numel() for p in model.parameters())
+            trainer = Trainer(
+                model=model, train_loader=loader, dev_loader=loader,
+                config=config, output_dir=root / "output",
+            )
+            try:
+                trainer.train()
+                checkpoint_path = trainer.output_dir / "best_model.pt"
+                checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+                self.assertIs(checkpoint["config"]["detach_utility_from_input_projection"], True)
+                self.assertEqual(state_keys, list(checkpoint["model_state_dict"]))
+                self.assertEqual(parameter_count, sum(p.numel() for p in model.parameters()))
+                restored = _utility_models()["conventional"].to(trainer.device)
+                restored.load_state_dict(checkpoint["model_state_dict"], strict=True)
+                model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+                model.eval()
+                restored.eval()
+                features = _dummy_features(2).to(trainer.device)
+                with torch.no_grad():
+                    expected = model(features)
+                    actual = restored(features)
+                for key in expected:
+                    torch.testing.assert_close(actual[key], expected[key], rtol=0, atol=0)
+                with patch.object(
+                    model, "compute_counterfactual_router_logits",
+                    side_effect=AssertionError("Utility helper must not run in test evaluation"),
+                ):
+                    current_report = trainer.evaluate_test(loader)
+                    del checkpoint["config"]["detach_utility_from_input_projection"]
+                    torch.save(checkpoint, checkpoint_path)
+                    legacy_report = trainer.evaluate_test(loader)
+                self.assertEqual(current_report["metrics"], legacy_report["metrics"])
+            finally:
+                trainer.close()
+            log_text = (trainer.output_dir / "train.log").read_text(encoding="utf-8")
+            self.assertIn("detach_utility_from_input_projection=true", log_text)
+
     def test_train_checkpoint_test_and_analysis_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -476,6 +743,7 @@ def _dummy_features(batch_size: int) -> torch.Tensor:
 def _utility_losses(
     outputs: dict[str, torch.Tensor],
     labels: torch.Tensor,
+    counterfactual_router_logits: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     return compute_training_losses(
         outputs,
@@ -491,6 +759,7 @@ def _utility_losses(
         invariance_criterion=CrossModalNLIInvarianceLoss(),
         counterfactual_routing_loss_coef=0.1,
         use_counterfactual_routing_loss=True,
+        counterfactual_router_logits=counterfactual_router_logits,
     )
 
 

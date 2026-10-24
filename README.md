@@ -111,6 +111,22 @@ candidate expert improves the final decision. Target generation runs only for
 labeled training/evaluation diagnostics. Standard inference remains a sparse
 top-k forward without labels or counterfactual enumeration.
 
+The shared trainer supports `detach_utility_from_input_projection: true` for
+counterfactual utility routing. During training with a positive utility-loss
+coefficient, it recomputes utility logits with the same router and detached
+`pre_moe_output`. Utility loss then updates only the router and mode embedding,
+not `InputProjection`. Classification and all other losses keep their original
+gradient paths. The Smooth L1 objective and counterfactual targets are unchanged.
+
+Set this flag to `false` (also the default when absent) to restore the original
+utility gradient path. Only `deepseek_moe_fusion_dropout.yaml` enables it by
+default; the other five MoE YAMLs explicitly disable it. The flag must be a YAML
+boolean and cannot be enabled for dense or non-utility routing models. A zero
+utility-loss coefficient skips the extra branch. This is a trainer option, not
+a model-constructor option: direct model forward, inference, dev/test, parameter
+counts, and state-dict keys are unchanged. The flag is logged at run start and
+stored in checkpoint `config`; old model weights still load with `strict=True`.
+
 For MoE models, each routed expert runs only on its assigned rows. The routed output is added
 to `h_pre` through a residual connection and normalized; DeepSeek also adds its
 always-on shared-expert output. Learnable semantic attention then pools the four
