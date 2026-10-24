@@ -27,9 +27,9 @@ mode_auxiliary_loss_coef: 0.2
 use_invariance_loss: true
 invariance_loss_coef: 0.1
 reliability_weighted_invariance: false
-counterfactual_routing_loss_coef: 0.0
+counterfactual_routing_loss_coef: 0.1
 
-aux_loss_coef: 0.01
+aux_loss_coef: 0.001
 
 fusion_modality_dropout_enabled: false
 fusion_drop_tt_prob: 0.00
