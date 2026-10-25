@@ -9,7 +9,7 @@ expert_ffn_dim: 1024
 num_labels: 3
 dropout: 0.3
 
-use_relation_contrastive_loss: false
+use_relation_contrastive_loss: true
 alignment_hidden_dim: 512
 relation_contrastive_margin: 0.5
 relation_contrastive_loss_coef: 0.1
@@ -26,7 +26,7 @@ reliability_embedding_dim: 16
 
 use_mode_auxiliary_loss: true
 mode_auxiliary_loss_coef: 0.2
-use_invariance_loss: true
+use_invariance_loss: false
 invariance_loss_coef: 0.1
 reliability_weighted_invariance: false
 counterfactual_routing_loss_coef: 0.1
