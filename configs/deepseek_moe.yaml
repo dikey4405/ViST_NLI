@@ -10,7 +10,7 @@ num_labels: 3
 dropout: 0.3
 
 use_relation_contrastive_loss: true
-alignment_hidden_dim: 512
+alignment_hidden_dim: 1024
 relation_contrastive_margin: 0.5
 relation_contrastive_loss_coef: 0.1
 
@@ -42,7 +42,7 @@ seed: 42
 batch_size: 16
 num_workers: 0
 num_epochs: 30
-learning_rate: 0.0001
+learning_rate: 0.00005
 weight_decay: 0.01
 label_smoothing: 0.0
 scheduler_name: cosine_with_warmup
