@@ -30,6 +30,7 @@ MOE_MODEL_KWARGS = COMMON_MODEL_KWARGS + (
     "reliability_embedding_dim",
     "routing_strategy",
     "mode_evidence_stage",
+    "detach_post_moe_evidence_from_backbone",
 )
 
 DENSE_FULL_MODEL_KWARGS = COMMON_MODEL_KWARGS + (

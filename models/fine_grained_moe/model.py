@@ -30,6 +30,7 @@ class FineGrainedMoENLIModel(RoutedMoENLIModel):
         reliability_embedding_dim: int = 16,
         routing_strategy: str | None = None,
         mode_evidence_stage: str = "pre_moe",
+        detach_post_moe_evidence_from_backbone: bool = False,
     ) -> None:
         if num_shared_experts != 0:
             raise ValueError("FineGrainedMoENLIModel does not use shared experts.")
@@ -55,4 +56,7 @@ class FineGrainedMoENLIModel(RoutedMoENLIModel):
             reliability_embedding_dim=reliability_embedding_dim,
             routing_strategy=routing_strategy,
             mode_evidence_stage=mode_evidence_stage,
+            detach_post_moe_evidence_from_backbone=(
+                detach_post_moe_evidence_from_backbone
+            ),
         )

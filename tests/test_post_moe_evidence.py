@@ -40,6 +40,17 @@ class TestPostMoEEvidenceArchitecture(unittest.TestCase):
                 **reliability_kwargs,
                 mode_evidence_stage="post_moe",
             )
+        with self.assertRaisesRegex(ValueError, "must be a boolean"):
+            ConventionalMoENLIModel(
+                **_common_kwargs(),
+                mode_evidence_stage="post_moe",
+                detach_post_moe_evidence_from_backbone="true",
+            )
+        with self.assertRaisesRegex(ValueError, "requires.*post_moe"):
+            ConventionalMoENLIModel(
+                **_common_kwargs(),
+                detach_post_moe_evidence_from_backbone=True,
+            )
 
     def test_evidence_uses_the_configured_representation_for_all_moe_models(self) -> None:
         features = _dummy_features(batch_size=2)
@@ -155,11 +166,91 @@ class TestPostMoEEvidenceArchitecture(unittest.TestCase):
                     for call in evidence_forward.call_args_list[1:]:
                         self.assertEqual(call.args[0].shape, (6, 4, 8))
 
+    def test_detached_evidence_isolates_auxiliary_but_not_classification_gradient(
+        self,
+    ) -> None:
+        labels = torch.tensor([0, 1, 2])
+        criterion = CrossModalNLIInvarianceLoss()
+        for objective_name in ("mode", "invariance"):
+            with self.subTest(objective=objective_name):
+                model = _models("post_moe", detach_evidence=True)["deepseek"]
+                outputs = model(_dummy_features(batch_size=3))
+                if objective_name == "mode":
+                    loss = F.cross_entropy(
+                        outputs["mode_logits"].reshape(-1, 3),
+                        labels.unsqueeze(1).expand(-1, 4).reshape(-1),
+                    )
+                else:
+                    loss = criterion(outputs["mode_probs"])
+                loss.backward()
+
+                self.assertTrue(_has_gradient(model.mode_nli_head))
+                for module in (
+                    model.input_projection,
+                    model.router,
+                    model.mode_embedding,
+                    model.output_norm,
+                    model.routed_experts,
+                    model.shared_experts,
+                    model.mode_pooling,
+                    model.classifier,
+                ):
+                    self.assertFalse(_has_gradient(module))
+
+        model = _models("post_moe", detach_evidence=True)["deepseek"]
+        outputs = model(_dummy_features(batch_size=3))
+        F.cross_entropy(outputs["logits"], labels).backward()
+        for module in (
+            model.input_projection,
+            model.router,
+            model.mode_embedding,
+            model.output_norm,
+            model.shared_experts,
+            model.mode_pooling,
+            model.classifier,
+        ):
+            self.assertTrue(_has_gradient(module))
+        for expert_id in outputs["topk_indices"].unique().tolist():
+            self.assertTrue(_has_gradient(model.routed_experts[expert_id]))
+        self.assertFalse(_has_gradient(model.mode_nli_head))
+
+    def test_detach_changes_only_gradient_connectivity(self) -> None:
+        attached = _models("post_moe", detach_evidence=False)["deepseek"]
+        detached = _models("post_moe", detach_evidence=True)["deepseek"]
+        detached.load_state_dict(attached.state_dict(), strict=True)
+        attached.eval()
+        detached.eval()
+        features = _dummy_features(batch_size=2)
+
+        with torch.no_grad():
+            attached_outputs = attached(features)
+            detached_outputs = detached(features)
+
+        self.assertEqual(
+            list(attached.state_dict()),
+            list(detached.state_dict()),
+        )
+        self.assertEqual(
+            sum(parameter.numel() for parameter in attached.parameters()),
+            sum(parameter.numel() for parameter in detached.parameters()),
+        )
+        self.assertEqual(set(attached_outputs), set(detached_outputs))
+        for key in attached_outputs:
+            torch.testing.assert_close(
+                attached_outputs[key],
+                detached_outputs[key],
+                rtol=0,
+                atol=0,
+            )
+
 
 class TestPostMoEEvidenceIntegration(unittest.TestCase):
     def test_yaml_is_controlled_and_keeps_the_checkpoint_contract(self) -> None:
         baseline_config = load_yaml_config("deepseek_moe_fusion_dropout.yaml")
         experiment_config = load_yaml_config("deepseek_moe_post_moe_evidence.yaml")
+        detached_config = load_yaml_config(
+            "deepseek_moe_post_moe_evidence_detached.yaml"
+        )
         all_keys = set(baseline_config) | set(experiment_config)
         differences = {
             key
@@ -175,6 +266,21 @@ class TestPostMoEEvidenceIntegration(unittest.TestCase):
         self.assertEqual(
             experiment_config["output_dir"],
             "outputs/deepseek_moe_post_moe_evidence/{feature_source}",
+        )
+        detached_differences = {
+            key
+            for key in set(experiment_config) | set(detached_config)
+            if experiment_config.get(key) != detached_config.get(key)
+        }
+        self.assertEqual(
+            detached_differences,
+            {"detach_post_moe_evidence_from_backbone", "output_dir"},
+        )
+        self.assertFalse(
+            experiment_config["detach_post_moe_evidence_from_backbone"]
+        )
+        self.assertTrue(
+            detached_config["detach_post_moe_evidence_from_backbone"]
         )
 
         for model_name in (
@@ -198,6 +304,7 @@ class TestPostMoEEvidenceIntegration(unittest.TestCase):
 
         baseline = build_model(baseline_config)
         experiment = build_model(experiment_config)
+        detached = build_model(detached_config)
         self.assertEqual(
             count_parameters(baseline)["total_parameters"],
             25_222_078,
@@ -206,13 +313,19 @@ class TestPostMoEEvidenceIntegration(unittest.TestCase):
             count_parameters(experiment)["total_parameters"],
             25_222_078,
         )
+        self.assertEqual(
+            count_parameters(detached)["total_parameters"],
+            25_222_078,
+        )
         self.assertEqual(list(baseline.state_dict()), list(experiment.state_dict()))
+        self.assertEqual(list(experiment.state_dict()), list(detached.state_dict()))
         self.assertEqual(len(experiment.state_dict()), 68)
         experiment.load_state_dict(baseline.state_dict(), strict=True)
+        detached.load_state_dict(experiment.state_dict(), strict=True)
 
     def test_trainer_logs_stage_and_rejects_mismatched_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            model = _models("post_moe")["deepseek"]
+            model = _models("post_moe", detach_evidence=True)["deepseek"]
             features = _dummy_features(batch_size=2)
             loader = DataLoader(
                 [
@@ -240,6 +353,11 @@ class TestPostMoEEvidenceIntegration(unittest.TestCase):
                     checkpoint["config"]["mode_evidence_stage"],
                     "post_moe",
                 )
+                self.assertTrue(
+                    checkpoint["config"][
+                        "detach_post_moe_evidence_from_backbone"
+                    ]
+                )
                 with self.assertRaisesRegex(ValueError, "does not match"):
                     trainer._validate_checkpoint_mode_evidence_stage(
                         {
@@ -264,6 +382,10 @@ class TestPostMoEEvidenceIntegration(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("mode_evidence_stage=post_moe", log_text)
+            self.assertIn(
+                "detach_post_moe_evidence_from_backbone=true",
+                log_text,
+            )
             self.assertEqual(
                 Trainer._mode_evidence_stage_from_config({}),
                 "pre_moe",
@@ -290,8 +412,16 @@ def _common_kwargs() -> dict[str, object]:
     }
 
 
-def _models(stage: str) -> dict[str, nn.Module]:
-    common = {**_common_kwargs(), "mode_evidence_stage": stage}
+def _models(
+    stage: str,
+    *,
+    detach_evidence: bool = False,
+) -> dict[str, nn.Module]:
+    common = {
+        **_common_kwargs(),
+        "mode_evidence_stage": stage,
+        "detach_post_moe_evidence_from_backbone": detach_evidence,
+    }
     return {
         "conventional": ConventionalMoENLIModel(**common),
         "fine_grained": FineGrainedMoENLIModel(**common),
@@ -316,6 +446,7 @@ def _trainer_config() -> dict[str, object]:
         "feature_source": "synthetic",
         "routing_strategy": "counterfactual_utility",
         "mode_evidence_stage": "post_moe",
+        "detach_post_moe_evidence_from_backbone": True,
         "input_dim": 16,
         "num_labels": 3,
         "batch_size": 2,

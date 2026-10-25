@@ -232,12 +232,31 @@ class Trainer:
         self.config = config
         self.routing_strategy = getattr(model, "routing_strategy", None)
         self.mode_evidence_stage = getattr(model, "mode_evidence_stage", None)
+        self.detach_post_moe_evidence_from_backbone = getattr(
+            model,
+            "detach_post_moe_evidence_from_backbone",
+            None,
+        )
         if self.mode_evidence_stage is not None:
             configured_evidence_stage = self._mode_evidence_stage_from_config(config)
             if configured_evidence_stage != self.mode_evidence_stage:
                 raise ValueError(
                     f"Config mode evidence stage {configured_evidence_stage!r} does "
                     f"not match model mode evidence stage {self.mode_evidence_stage!r}."
+                )
+        if self.detach_post_moe_evidence_from_backbone is not None:
+            configured_detach = config.get(
+                "detach_post_moe_evidence_from_backbone",
+                False,
+            )
+            if not isinstance(configured_detach, bool):
+                raise ValueError(
+                    "detach_post_moe_evidence_from_backbone must be a boolean."
+                )
+            if configured_detach != self.detach_post_moe_evidence_from_backbone:
+                raise ValueError(
+                    "Config detach_post_moe_evidence_from_backbone does not "
+                    "match the model."
                 )
         self.detach_utility_from_input_projection = config.get(
             "detach_utility_from_input_projection", False
@@ -346,9 +365,11 @@ class Trainer:
         )
         if self.mode_evidence_stage is not None:
             self.logger.info(
-                "ARCHITECTURE | routing_strategy=%s | mode_evidence_stage=%s",
+                "ARCHITECTURE | routing_strategy=%s | mode_evidence_stage=%s | "
+                "detach_post_moe_evidence_from_backbone=%s",
                 self.routing_strategy,
                 self.mode_evidence_stage,
+                str(self.detach_post_moe_evidence_from_backbone).lower(),
             )
         self.logger.info(
             "PARAMETERS | total=%d | trainable=%d",

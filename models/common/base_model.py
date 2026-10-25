@@ -41,6 +41,7 @@ class RoutedMoENLIModel(nn.Module):
         reliability_embedding_dim: int = 16,
         routing_strategy: str | None = None,
         mode_evidence_stage: str = "pre_moe",
+        detach_post_moe_evidence_from_backbone: bool = False,
     ) -> None:
         super().__init__()
         if input_dim % PAIR_FEATURE_COMPONENTS != 0:
@@ -60,6 +61,21 @@ class RoutedMoENLIModel(nn.Module):
         )
         self.mode_evidence_stage = self._resolve_mode_evidence_stage(
             mode_evidence_stage
+        )
+        if not isinstance(detach_post_moe_evidence_from_backbone, bool):
+            raise ValueError(
+                "detach_post_moe_evidence_from_backbone must be a boolean."
+            )
+        if (
+            detach_post_moe_evidence_from_backbone
+            and self.mode_evidence_stage != "post_moe"
+        ):
+            raise ValueError(
+                "detach_post_moe_evidence_from_backbone requires "
+                "mode_evidence_stage='post_moe'."
+            )
+        self.detach_post_moe_evidence_from_backbone = (
+            detach_post_moe_evidence_from_backbone
         )
         if (
             self.mode_evidence_stage == "post_moe"
@@ -309,8 +325,13 @@ class RoutedMoENLIModel(nn.Module):
 
         moe_output = moe_flat.reshape(batch_size, num_modes, self.hidden_dim)
         if self.mode_evidence_stage == "post_moe":
+            evidence_input = (
+                moe_output.detach()
+                if self.detach_post_moe_evidence_from_backbone
+                else moe_output
+            )
             mode_logits, mode_probabilities, reliability = (
-                self._compute_mode_evidence(moe_output)
+                self._compute_mode_evidence(evidence_input)
             )
         fusion_reliability: torch.Tensor | None = None
         if self.use_reliability_fusion:

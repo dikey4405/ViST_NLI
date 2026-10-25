@@ -46,6 +46,15 @@ python -m KLTN.source.training.train `
   --feature-source sonar
 ```
 
+The detached B2 variant keeps the same forward values while preventing mode and
+invariance losses from updating the MoE backbone:
+
+```powershell
+python -m KLTN.source.training.train `
+  --config deepseek_moe_post_moe_evidence_detached.yaml `
+  --feature-source sonar
+```
+
 ## Dense FFN baselines
 
 Three controlled non-MoE baselines reuse the same saved feature files and
@@ -113,6 +122,13 @@ to `h_pre` and preserves the original behavior. The controlled
 `deepseek_moe_post_moe_evidence.yaml` experiment instead uses `post_moe`, applying
 the same head to the residual, normalized MoE output. This lets mode and
 invariance objectives supervise the routed and shared experts directly.
+Set `detach_post_moe_evidence_from_backbone: true` to feed a detached view of
+that output to the evidence head. The evidence head still learns, but its mode
+and invariance gradients stop before the input projection, router, output norm,
+and experts. Final classification continues to use the original, attached MoE
+output, so its gradient path is unchanged. The flag is valid only with
+`mode_evidence_stage: post_moe` and does not change parameters, state-dict keys,
+forward values, or inference.
 Reliability represents evidence trustworthiness and conditions final modality
 fusion; it is not an input to the counterfactual utility router. Post-MoE
 evidence is rejected for reliability-aware routing because that router needs
@@ -137,8 +153,8 @@ not `InputProjection`. Classification and all other losses keep their original
 gradient paths. The Smooth L1 objective and counterfactual targets are unchanged.
 
 Set this flag to `false` (also the default when absent) to restore the original
-utility gradient path. `deepseek_moe_fusion_dropout.yaml` and the controlled
-post-MoE evidence experiment enable it; the other five MoE YAMLs explicitly
+utility gradient path. `deepseek_moe_fusion_dropout.yaml` and both controlled
+post-MoE evidence experiments enable it; the other five MoE YAMLs explicitly
 disable it. The flag must be a YAML boolean and cannot be enabled for dense or
 non-utility routing models. A zero utility-loss coefficient skips the extra
 branch. This is a trainer option, not
