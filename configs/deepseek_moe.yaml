@@ -28,7 +28,7 @@ use_mode_auxiliary_loss: true
 mode_auxiliary_loss_coef: 0.2
 use_invariance_loss: true
 invariance_loss_coef: 0.1
-reliability_weighted_invariance: true
+reliability_weighted_invariance: false
 counterfactual_routing_loss_coef: 0.1
 detach_utility_from_input_projection: true
 
@@ -42,7 +42,7 @@ seed: 42
 batch_size: 16
 num_workers: 0
 num_epochs: 30
-learning_rate: 0.00005
+learning_rate: 0.0001
 weight_decay: 0.01
 label_smoothing: 0.0
 scheduler_name: cosine_with_warmup
