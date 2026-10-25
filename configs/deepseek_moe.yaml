@@ -20,7 +20,7 @@ detach_post_moe_evidence_from_backbone: false
 use_reliability_routing: false
 use_reliability_fusion: true
 reliability_estimator: entropy
-detach_reliability_for_fusion: false
+detach_reliability_for_fusion: true
 mode_embedding_dim: 32
 reliability_embedding_dim: 16
 
@@ -28,7 +28,7 @@ use_mode_auxiliary_loss: true
 mode_auxiliary_loss_coef: 0.2
 use_invariance_loss: true
 invariance_loss_coef: 0.1
-reliability_weighted_invariance: false
+reliability_weighted_invariance: true
 counterfactual_routing_loss_coef: 0.1
 detach_utility_from_input_projection: true
 
