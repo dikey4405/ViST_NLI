@@ -9,8 +9,8 @@ expert_ffn_dim: 1024
 num_labels: 3
 dropout: 0.3
 
-use_relation_contrastive_loss: true
-alignment_hidden_dim: 1024
+use_relation_contrastive_loss: false
+alignment_hidden_dim: 512
 relation_contrastive_margin: 0.5
 relation_contrastive_loss_coef: 0.1
 
