@@ -15,6 +15,7 @@ relation_contrastive_margin: 0.5
 relation_contrastive_loss_coef: 0.1
 
 routing_strategy: counterfactual_utility
+mode_evidence_stage: pre_moe
 use_reliability_routing: false
 use_reliability_fusion: true
 reliability_estimator: entropy

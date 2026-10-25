@@ -40,6 +40,7 @@ class RoutedMoENLIModel(nn.Module):
         mode_embedding_dim: int = 32,
         reliability_embedding_dim: int = 16,
         routing_strategy: str | None = None,
+        mode_evidence_stage: str = "pre_moe",
     ) -> None:
         super().__init__()
         if input_dim % PAIR_FEATURE_COMPONENTS != 0:
@@ -57,6 +58,18 @@ class RoutedMoENLIModel(nn.Module):
             routing_strategy,
             use_reliability_routing,
         )
+        self.mode_evidence_stage = self._resolve_mode_evidence_stage(
+            mode_evidence_stage
+        )
+        if (
+            self.mode_evidence_stage == "post_moe"
+            and self.routing_strategy == "reliability"
+        ):
+            raise ValueError(
+                "mode_evidence_stage='post_moe' cannot be used with "
+                "routing_strategy='reliability' because routing requires "
+                "reliability before the MoE block."
+            )
         self.use_reliability_routing = self.routing_strategy == "reliability"
         self.use_reliability_fusion = use_reliability_fusion
         self.detach_reliability_for_routing = detach_reliability_for_routing
@@ -152,6 +165,19 @@ class RoutedMoENLIModel(nn.Module):
             )
         return routing_strategy
 
+    @staticmethod
+    def _resolve_mode_evidence_stage(mode_evidence_stage: str) -> str:
+        valid_stages = {"pre_moe", "post_moe"}
+        if (
+            not isinstance(mode_evidence_stage, str)
+            or mode_evidence_stage not in valid_stages
+        ):
+            raise ValueError(
+                f"mode_evidence_stage must be one of {sorted(valid_stages)}, "
+                f"got {mode_evidence_stage!r}."
+            )
+        return mode_evidence_stage
+
     def build_classification_features(
         self,
         premise_embeddings: torch.Tensor,
@@ -213,6 +239,21 @@ class RoutedMoENLIModel(nn.Module):
         mode_ids = mode_ids.unsqueeze(0).expand(batch_size, -1)
         return mode_ids, self.mode_embedding(mode_ids)
 
+    def _compute_mode_evidence(
+        self,
+        mode_embeddings: torch.Tensor,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+        if self.mode_nli_head is None and self.reliability_estimator is None:
+            return None, None, None
+        if self.mode_nli_head is None or self.reliability_estimator is None:
+            raise RuntimeError(
+                "Mode evidence requires both ModeNLIHead and a reliability estimator."
+            )
+        mode_logits = self.mode_nli_head(mode_embeddings)
+        mode_probabilities = torch.softmax(mode_logits, dim=-1)
+        reliability = self.reliability_estimator(mode_logits)
+        return mode_logits, mode_probabilities, reliability
+
     def forward(self, features: torch.Tensor) -> dict[str, torch.Tensor]:
         batch_size, num_modes = validate_feature_tensor(
             features,
@@ -232,10 +273,10 @@ class RoutedMoENLIModel(nn.Module):
         mode_logits: torch.Tensor | None = None
         mode_probabilities: torch.Tensor | None = None
         reliability: torch.Tensor | None = None
-        if self.mode_nli_head is not None and self.reliability_estimator is not None:
-            mode_logits = self.mode_nli_head(projected)
-            mode_probabilities = torch.softmax(mode_logits, dim=-1)
-            reliability = self.reliability_estimator(mode_logits)
+        if self.mode_evidence_stage == "pre_moe":
+            mode_logits, mode_probabilities, reliability = (
+                self._compute_mode_evidence(projected)
+            )
 
         flat = projected.reshape(batch_size * num_modes, self.hidden_dim)
         if self.routing_strategy in {"reliability", "counterfactual_utility"}:
@@ -267,6 +308,10 @@ class RoutedMoENLIModel(nn.Module):
         moe_flat, routed_flat, shared_flat = self._apply_moe_block(flat, routing)
 
         moe_output = moe_flat.reshape(batch_size, num_modes, self.hidden_dim)
+        if self.mode_evidence_stage == "post_moe":
+            mode_logits, mode_probabilities, reliability = (
+                self._compute_mode_evidence(moe_output)
+            )
         fusion_reliability: torch.Tensor | None = None
         if self.use_reliability_fusion:
             if reliability is None:
@@ -426,17 +471,31 @@ class RoutedMoENLIModel(nn.Module):
                 hidden_dim,
             )
 
+            candidate_reliability: torch.Tensor | None = None
+            if self.mode_evidence_stage == "post_moe":
+                _, _, candidate_reliability = self._compute_mode_evidence(
+                    counterfactual_modes
+                )
+
             fusion_reliability: torch.Tensor | None = None
             if self.use_reliability_fusion:
-                if reliability is None:
-                    raise RuntimeError(
-                        "Counterfactual fusion requires teacher reliability."
-                    )
-                fusion_reliability = reliability.unsqueeze(1).expand(
-                    -1,
-                    num_experts,
-                    -1,
-                ).reshape(batch_size * num_experts, num_modes)
+                if self.mode_evidence_stage == "post_moe":
+                    if candidate_reliability is None:
+                        raise RuntimeError(
+                            "Post-MoE counterfactual fusion requires candidate "
+                            "reliability."
+                        )
+                    fusion_reliability = candidate_reliability
+                else:
+                    if reliability is None:
+                        raise RuntimeError(
+                            "Counterfactual fusion requires teacher reliability."
+                        )
+                    fusion_reliability = reliability.unsqueeze(1).expand(
+                        -1,
+                        num_experts,
+                        -1,
+                    ).reshape(batch_size * num_experts, num_modes)
             fused, _ = self.mode_pooling(
                 counterfactual_modes,
                 fusion_reliability,

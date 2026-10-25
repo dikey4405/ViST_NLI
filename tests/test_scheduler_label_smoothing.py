@@ -19,6 +19,7 @@ TRAINING_CONFIG_NAMES = (
     "fine_grained_moe_fusion_dropout.yaml",
     "deepseek_moe.yaml",
     "deepseek_moe_fusion_dropout.yaml",
+    "deepseek_moe_post_moe_evidence.yaml",
     "dense_ffn_mean.yaml",
     "dense_ffn_attention.yaml",
     "dense_ffn_full.yaml",

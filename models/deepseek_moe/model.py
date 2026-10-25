@@ -29,6 +29,7 @@ class DeepSeekMoENLIModel(RoutedMoENLIModel):
         mode_embedding_dim: int = 32,
         reliability_embedding_dim: int = 16,
         routing_strategy: str | None = None,
+        mode_evidence_stage: str = "pre_moe",
     ) -> None:
         if num_shared_experts < 1:
             raise ValueError("DeepSeekMoENLIModel requires at least one shared expert.")
@@ -54,4 +55,5 @@ class DeepSeekMoENLIModel(RoutedMoENLIModel):
             mode_embedding_dim=mode_embedding_dim,
             reliability_embedding_dim=reliability_embedding_dim,
             routing_strategy=routing_strategy,
+            mode_evidence_stage=mode_evidence_stage,
         )

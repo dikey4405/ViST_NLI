@@ -231,6 +231,14 @@ class Trainer:
         self.dev_loader = dev_loader
         self.config = config
         self.routing_strategy = getattr(model, "routing_strategy", None)
+        self.mode_evidence_stage = getattr(model, "mode_evidence_stage", None)
+        if self.mode_evidence_stage is not None:
+            configured_evidence_stage = self._mode_evidence_stage_from_config(config)
+            if configured_evidence_stage != self.mode_evidence_stage:
+                raise ValueError(
+                    f"Config mode evidence stage {configured_evidence_stage!r} does "
+                    f"not match model mode evidence stage {self.mode_evidence_stage!r}."
+                )
         self.detach_utility_from_input_projection = config.get(
             "detach_utility_from_input_projection", False
         )
@@ -336,6 +344,12 @@ class Trainer:
             self.label_smoothing,
             str(self.detach_utility_from_input_projection).lower(),
         )
+        if self.mode_evidence_stage is not None:
+            self.logger.info(
+                "ARCHITECTURE | routing_strategy=%s | mode_evidence_stage=%s",
+                self.routing_strategy,
+                self.mode_evidence_stage,
+            )
         self.logger.info(
             "PARAMETERS | total=%d | trainable=%d",
             parameter_counts["total_parameters"],
@@ -543,6 +557,7 @@ class Trainer:
         checkpoint_path = self.output_dir / "best_model.pt"
         checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
         self._validate_checkpoint_routing_strategy(checkpoint)
+        self._validate_checkpoint_mode_evidence_stage(checkpoint)
         self.model.load_state_dict(checkpoint["model_state_dict"], strict=True)
         selection_metric, selection_mode = self._checkpoint_selection_metadata(
             checkpoint
@@ -675,6 +690,17 @@ class Trainer:
             )
         return "topk"
 
+    @staticmethod
+    def _mode_evidence_stage_from_config(config: dict[str, Any]) -> str:
+        stage = config.get("mode_evidence_stage", "pre_moe")
+        valid_stages = {"pre_moe", "post_moe"}
+        if not isinstance(stage, str) or stage not in valid_stages:
+            raise ValueError(
+                f"mode_evidence_stage must be one of {sorted(valid_stages)}, "
+                f"got {stage!r}."
+            )
+        return stage
+
     def _validate_checkpoint_routing_strategy(
         self,
         checkpoint: dict[str, Any],
@@ -691,6 +717,25 @@ class Trainer:
             raise ValueError(
                 f"Checkpoint routing strategy {checkpoint_strategy!r} does not match "
                 f"model routing strategy {self.routing_strategy!r}."
+            )
+
+    def _validate_checkpoint_mode_evidence_stage(
+        self,
+        checkpoint: dict[str, Any],
+    ) -> None:
+        if self.mode_evidence_stage is None:
+            return
+        checkpoint_config = checkpoint.get("config")
+        if not isinstance(checkpoint_config, dict):
+            raise ValueError(
+                "Checkpoint is missing config metadata required to validate "
+                "the mode evidence stage."
+            )
+        checkpoint_stage = self._mode_evidence_stage_from_config(checkpoint_config)
+        if checkpoint_stage != self.mode_evidence_stage:
+            raise ValueError(
+                f"Checkpoint mode evidence stage {checkpoint_stage!r} does not "
+                f"match model mode evidence stage {self.mode_evidence_stage!r}."
             )
 
     def _build_logger(self) -> logging.Logger:

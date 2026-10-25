@@ -37,6 +37,15 @@ Checkpoints and logs are separated by both model and feature source, for
 example `outputs/conventional_moe_counterfactual_utility/sonar` and
 `outputs/conventional_moe_counterfactual_utility/phobert_xlsr`.
 
+The controlled post-MoE evidence experiment uses the same DeepSeek settings
+and a separate output directory:
+
+```powershell
+python -m KLTN.source.training.train `
+  --config deepseek_moe_post_moe_evidence.yaml `
+  --feature-source sonar
+```
+
 ## Dense FFN baselines
 
 Three controlled non-MoE baselines reuse the same saved feature files and
@@ -99,9 +108,15 @@ separate label-aware premise/hypothesis objective.
 
 The input projection produces `h_pre [B, 4, D]`. A shared `ModeNLIHead` predicts
 three-class evidence for every mode, and normalized prediction entropy produces
-a reliability value in `[0, 1]`. This reliability represents evidence
-trustworthiness and conditions final modality fusion. It is not an input to the
-proposed expert router.
+a reliability value in `[0, 1]`. `mode_evidence_stage: pre_moe` applies this head
+to `h_pre` and preserves the original behavior. The controlled
+`deepseek_moe_post_moe_evidence.yaml` experiment instead uses `post_moe`, applying
+the same head to the residual, normalized MoE output. This lets mode and
+invariance objectives supervise the routed and shared experts directly.
+Reliability represents evidence trustworthiness and conditions final modality
+fusion; it is not an input to the counterfactual utility router. Post-MoE
+evidence is rejected for reliability-aware routing because that router needs
+reliability before expert selection.
 
 The counterfactual utility router predicts expert suitability from `h_pre` and
 learned mode identity. Its logits estimate the expected reduction in final NLI
@@ -110,6 +125,9 @@ targets use `U = L_base - L_counterfactual`; positive utility means that the
 candidate expert improves the final decision. Target generation runs only for
 labeled training/evaluation diagnostics. Standard inference remains a sparse
 top-k forward without labels or counterfactual enumeration.
+For post-MoE evidence, every counterfactual candidate recomputes mode evidence
+and reliability before final fusion. Pre-MoE evidence continues to reuse the
+teacher reliability exactly as before.
 
 The shared trainer supports `detach_utility_from_input_projection: true` for
 counterfactual utility routing. During training with a positive utility-loss
@@ -119,10 +137,11 @@ not `InputProjection`. Classification and all other losses keep their original
 gradient paths. The Smooth L1 objective and counterfactual targets are unchanged.
 
 Set this flag to `false` (also the default when absent) to restore the original
-utility gradient path. Only `deepseek_moe_fusion_dropout.yaml` enables it by
-default; the other five MoE YAMLs explicitly disable it. The flag must be a YAML
-boolean and cannot be enabled for dense or non-utility routing models. A zero
-utility-loss coefficient skips the extra branch. This is a trainer option, not
+utility gradient path. `deepseek_moe_fusion_dropout.yaml` and the controlled
+post-MoE evidence experiment enable it; the other five MoE YAMLs explicitly
+disable it. The flag must be a YAML boolean and cannot be enabled for dense or
+non-utility routing models. A zero utility-loss coefficient skips the extra
+branch. This is a trainer option, not
 a model-constructor option: direct model forward, inference, dev/test, parameter
 counts, and state-dict keys are unchanged. The flag is logged at run start and
 stored in checkpoint `config`; old model weights still load with `strict=True`.

@@ -29,6 +29,7 @@ MOE_MODEL_KWARGS = COMMON_MODEL_KWARGS + (
     "mode_embedding_dim",
     "reliability_embedding_dim",
     "routing_strategy",
+    "mode_evidence_stage",
 )
 
 DENSE_FULL_MODEL_KWARGS = COMMON_MODEL_KWARGS + (
