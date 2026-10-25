@@ -16,7 +16,7 @@ relation_contrastive_loss_coef: 0.1
 
 routing_strategy: counterfactual_utility
 mode_evidence_stage: pre_moe
-detach_post_moe_evidence_from_backbone: true
+detach_post_moe_evidence_from_backbone: false
 use_reliability_routing: false
 use_reliability_fusion: true
 reliability_estimator: entropy

@@ -7,7 +7,7 @@ num_shared_experts: 1
 routed_top_k: 3
 expert_ffn_dim: 1024
 num_labels: 3
-dropout: 0.2
+dropout: 0.3
 
 use_relation_contrastive_loss: true
 alignment_hidden_dim: 512
@@ -30,9 +30,13 @@ use_invariance_loss: true
 invariance_loss_coef: 0.1
 reliability_weighted_invariance: false
 counterfactual_routing_loss_coef: 0.1
-detach_utility_from_input_projection: false
+detach_utility_from_input_projection: true
 
 aux_loss_coef: 0.01
+
+fusion_modality_dropout_enabled: false
+fusion_drop_tt_prob: 0.00
+fusion_drop_tt_st_prob: 0.00
 
 seed: 42
 batch_size: 16
