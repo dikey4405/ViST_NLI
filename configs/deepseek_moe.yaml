@@ -32,7 +32,7 @@ reliability_weighted_invariance: false
 counterfactual_routing_loss_coef: 0.1
 detach_utility_from_input_projection: true
 
-aux_loss_coef: 0.01
+aux_loss_coef: 0.0
 
 fusion_modality_dropout_enabled: false
 fusion_drop_tt_prob: 0.00
