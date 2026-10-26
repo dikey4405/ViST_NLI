@@ -7,7 +7,7 @@ num_shared_experts: 1
 routed_top_k: 1
 expert_ffn_dim: 1024
 num_labels: 3
-dropout: 0.3
+dropout: 0.5
 
 use_relation_contrastive_loss: true
 alignment_hidden_dim: 512
