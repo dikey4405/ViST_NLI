@@ -1,6 +1,6 @@
 model_name: deepseek_moe
 input_dim: 4096
-num_modes: 4
+num_modes: 8
 hidden_dim: 1024
 num_routed_experts: 4
 num_shared_experts: 1
