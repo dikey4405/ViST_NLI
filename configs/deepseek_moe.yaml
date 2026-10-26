@@ -5,7 +5,7 @@ hidden_dim: 2048
 num_routed_experts: 8
 num_shared_experts: 1
 routed_top_k: 3
-expert_ffn_dim: 1024
+expert_ffn_dim: 2048
 num_labels: 3
 dropout: 0.3
 
