@@ -39,9 +39,9 @@ fusion_drop_tt_prob: 0.00
 fusion_drop_tt_st_prob: 0.00
 
 seed: 42
-batch_size: 16
+batch_size: 8
 num_workers: 1
-num_epochs: 20
+num_epochs: 30
 learning_rate: 0.00005
 weight_decay: 0.01
 label_smoothing: 0.0
