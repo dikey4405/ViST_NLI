@@ -37,8 +37,17 @@ Checkpoints and logs are separated by both model and feature source, for
 example `outputs/conventional_moe_counterfactual_utility/sonar` and
 `outputs/conventional_moe_counterfactual_utility/phobert_xlsr`.
 
-The controlled post-MoE evidence experiment uses the same DeepSeek settings
-and a separate output directory:
+The primary DeepSeek configuration uses pre-MoE evidence, detached utility
+supervision, and no fusion modality dropout:
+
+```powershell
+python -m KLTN.source.training.train `
+  --config deepseek_moe.yaml `
+  --feature-source sonar
+```
+
+The post-MoE evidence configurations are retained only as reproducible negative
+ablations. They use separate output directories and are not the primary model:
 
 ```powershell
 python -m KLTN.source.training.train `
@@ -118,7 +127,7 @@ separate label-aware premise/hypothesis objective.
 The input projection produces `h_pre [B, 4, D]`. A shared `ModeNLIHead` predicts
 three-class evidence for every mode, and normalized prediction entropy produces
 a reliability value in `[0, 1]`. `mode_evidence_stage: pre_moe` applies this head
-to `h_pre` and preserves the original behavior. The controlled
+to `h_pre` and is the primary DeepSeek architecture. The controlled
 `deepseek_moe_post_moe_evidence.yaml` experiment instead uses `post_moe`, applying
 the same head to the residual, normalized MoE output. This lets mode and
 invariance objectives supervise the routed and shared experts directly.
@@ -153,11 +162,11 @@ not `InputProjection`. Classification and all other losses keep their original
 gradient paths. The Smooth L1 objective and counterfactual targets are unchanged.
 
 Set this flag to `false` (also the default when absent) to restore the original
-utility gradient path. `deepseek_moe_fusion_dropout.yaml` and both controlled
-post-MoE evidence experiments enable it; the other five MoE YAMLs explicitly
-disable it. The flag must be a YAML boolean and cannot be enabled for dense or
-non-utility routing models. A zero utility-loss coefficient skips the extra
-branch. This is a trainer option, not
+utility gradient path. All DeepSeek experiment YAMLs enable detached utility
+supervision; Conventional and Fine-Grained YAMLs explicitly disable it. The
+flag must be a YAML boolean and cannot be enabled for dense or non-utility
+routing models. A zero utility-loss coefficient skips the extra branch. This is
+a trainer option, not
 a model-constructor option: direct model forward, inference, dev/test, parameter
 counts, and state-dict keys are unchanged. The flag is logged at run start and
 stored in checkpoint `config`; old model weights still load with `strict=True`.
