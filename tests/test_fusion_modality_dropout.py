@@ -344,10 +344,11 @@ class TestFusionModalityDropout(unittest.TestCase):
                     for key in all_keys
                     if baseline_config.get(key) != experiment_config.get(key)
                 }
-                expected_differences = set(common_differences)
-                if model_name == "deepseek_moe":
-                    expected_differences.add("dropout")
-                    expected_differences.add("detach_utility_from_input_projection")
+                expected_differences = (
+                    {"output_dir"}
+                    if model_name == "deepseek_moe"
+                    else set(common_differences)
+                )
                 self.assertEqual(actual_differences, expected_differences)
                 self.assertEqual(experiment_config["label_smoothing"], 0.0)
                 self.assertEqual(

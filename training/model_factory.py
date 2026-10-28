@@ -15,6 +15,7 @@ COMMON_MODEL_KWARGS = (
 )
 
 MOE_MODEL_KWARGS = COMMON_MODEL_KWARGS + (
+    "activation_function",
     "num_routed_experts",
     "num_shared_experts",
     "routed_top_k",
@@ -66,6 +67,11 @@ def build_model(config: dict[str, Any]) -> nn.Module:
         "dense_ffn_attention",
         "dense_ffn_full",
     }:
+        if "activation_function" in config:
+            raise ValueError(
+                "activation_function is supported only for MoE models; "
+                f"{model_name} keeps its GELU baseline."
+            )
         from ..models.dense_ffn.model import (
             DenseFFNAttentionNLIModel,
             DenseFFNFullNLIModel,

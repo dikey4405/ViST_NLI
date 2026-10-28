@@ -177,6 +177,14 @@ always-on shared-expert output. Learnable semantic attention then pools the four
 ordered mode representations. When enabled, a small reliability score branch is
 added to the attention score; reliability is detached on this path by default.
 
+MoE expert activation is selected with `activation_function` in the model YAML.
+Supported values are `relu`, `gelu`, `silu`, and `swiglu` (case-insensitive);
+missing values default to `gelu` for legacy compatibility. ReLU, GELU, and SiLU
+keep the existing `Linear(H,F) -> activation -> Dropout -> Linear(F,H)` expert.
+SwiGLU uses a fused value/gate projection with a parameter-matched width
+`round(2 * F / 3)`. One setting applies to every routed and shared expert, while
+input projection and all Dense FFN baselines continue to use GELU.
+
 Classification pair features are always rebuilt from the original premise and
 hypothesis embeddings. `PairAlignmentProjection` is an auxiliary head used only
 by the label-aware relation contrastive loss, so it does not transform the

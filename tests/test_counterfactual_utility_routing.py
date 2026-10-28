@@ -474,14 +474,14 @@ class TestUtilityGradientIsolation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "same shape"):
             _utility_losses(outputs, torch.tensor([0, 2]), torch.zeros(2, 4, 1))
 
-    def test_yaml_defaults_enable_only_deepseek_fusion(self) -> None:
+    def test_yaml_defaults_detach_utility_for_deepseek_configs(self) -> None:
         for name in ("conventional_moe", "fine_grained_moe", "deepseek_moe"):
             for suffix in ("", "_fusion_dropout"):
                 filename = f"{name}{suffix}.yaml"
                 config = load_yaml_config(filename)
                 self.assertIs(
                     config["detach_utility_from_input_projection"],
-                    filename == "deepseek_moe_fusion_dropout.yaml",
+                    name == "deepseek_moe",
                 )
         for name in ("dense_ffn_mean", "dense_ffn_attention", "dense_ffn_full"):
             self.assertNotIn("detach_utility_from_input_projection", load_yaml_config(f"{name}.yaml"))

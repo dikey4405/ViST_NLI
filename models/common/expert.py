@@ -1,7 +1,62 @@
 from __future__ import annotations
 
 import torch
+import torch.nn.functional as F
 from torch import nn
+
+
+SUPPORTED_EXPERT_ACTIVATIONS = ("relu", "gelu", "silu", "swiglu")
+
+
+def normalize_expert_activation(activation_function: str) -> str:
+    """Return a canonical expert activation name or raise a clear error."""
+
+    if not isinstance(activation_function, str):
+        raise ValueError(
+            "activation_function must be a string, "
+            f"got {type(activation_function).__name__}."
+        )
+    normalized = activation_function.strip().lower()
+    if normalized not in SUPPORTED_EXPERT_ACTIVATIONS:
+        supported = ", ".join(SUPPORTED_EXPERT_ACTIVATIONS)
+        raise ValueError(
+            f"Unsupported activation_function {activation_function!r}. "
+            f"Expected one of: {supported}."
+        )
+    return normalized
+
+
+def parameter_matched_swiglu_dim(expert_ffn_dim: int) -> int:
+    """Return the nearest two-thirds SwiGLU width used for parameter matching."""
+
+    if expert_ffn_dim < 1:
+        raise ValueError(
+            f"expert_ffn_dim must be positive, got {expert_ffn_dim}."
+        )
+    return max(1, round(2 * expert_ffn_dim / 3))
+
+
+class SwiGLU(nn.Module):
+    """Parameter-free SwiGLU gate over a fused value/gate projection."""
+
+    def forward(self, projected: torch.Tensor) -> torch.Tensor:
+        if projected.shape[-1] % 2 != 0:
+            raise ValueError(
+                "SwiGLU input dimension must be even so it can be split into "
+                f"value and gate branches, got {projected.shape[-1]}."
+            )
+        value, gate = projected.chunk(2, dim=-1)
+        return value * F.silu(gate)
+
+
+def _build_expert_activation(activation_function: str) -> nn.Module:
+    if activation_function == "relu":
+        return nn.ReLU()
+    if activation_function == "gelu":
+        return nn.GELU()
+    if activation_function == "silu":
+        return nn.SiLU()
+    return SwiGLU()
 
 
 class InputProjection(nn.Module):
@@ -23,13 +78,31 @@ class InputProjection(nn.Module):
 class FeedForwardExpert(nn.Module):
     """Shared expert FFN implementation used by all MoE variants."""
 
-    def __init__(self, hidden_dim: int, expert_ffn_dim: int, dropout: float) -> None:
+    def __init__(
+        self,
+        hidden_dim: int,
+        expert_ffn_dim: int,
+        dropout: float,
+        activation_function: str = "gelu",
+    ) -> None:
         super().__init__()
+        self.activation_function = normalize_expert_activation(activation_function)
+        self.expert_ffn_dim = expert_ffn_dim
+        self.effective_ffn_dim = (
+            parameter_matched_swiglu_dim(expert_ffn_dim)
+            if self.activation_function == "swiglu"
+            else expert_ffn_dim
+        )
+        input_projection_dim = (
+            2 * self.effective_ffn_dim
+            if self.activation_function == "swiglu"
+            else self.effective_ffn_dim
+        )
         self.net = nn.Sequential(
-            nn.Linear(hidden_dim, expert_ffn_dim),
-            nn.GELU(),
+            nn.Linear(hidden_dim, input_projection_dim),
+            _build_expert_activation(self.activation_function),
             nn.Dropout(dropout),
-            nn.Linear(expert_ffn_dim, hidden_dim),
+            nn.Linear(self.effective_ffn_dim, hidden_dim),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

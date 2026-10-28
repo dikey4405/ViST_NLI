@@ -6,7 +6,13 @@ from torch import nn
 
 from ...pair_features import PAIR_FEATURE_COMPONENTS, build_pair_feature, split_pair_feature
 from .contrastive import PairAlignmentProjection
-from .expert import FeedForwardExpert, InputProjection, ModeNLIHead, NLIClassifier
+from .expert import (
+    FeedForwardExpert,
+    InputProjection,
+    ModeNLIHead,
+    NLIClassifier,
+    normalize_expert_activation,
+)
 from .losses import compute_load_balancing_loss
 from .pooling import ModeAttentionPooling
 from .reliability import EntropyReliabilityEstimator
@@ -26,6 +32,7 @@ class RoutedMoENLIModel(nn.Module):
         num_routed_experts: int,
         routed_top_k: int,
         expert_ffn_dim: int,
+        activation_function: str = "gelu",
         num_labels: int,
         dropout: float,
         use_relation_contrastive_loss: bool,
@@ -54,6 +61,7 @@ class RoutedMoENLIModel(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_routed_experts = num_routed_experts
         self.routed_top_k = routed_top_k
+        self.activation_function = normalize_expert_activation(activation_function)
         self.use_relation_contrastive_loss = use_relation_contrastive_loss
         self.routing_strategy = self._resolve_routing_strategy(
             routing_strategy,
@@ -141,7 +149,15 @@ class RoutedMoENLIModel(nn.Module):
         else:
             self.router = TopKRouter(hidden_dim, num_routed_experts, routed_top_k)
         self.routed_experts = nn.ModuleList(
-            [FeedForwardExpert(hidden_dim, expert_ffn_dim, dropout) for _ in range(num_routed_experts)]
+            [
+                FeedForwardExpert(
+                    hidden_dim,
+                    expert_ffn_dim,
+                    dropout,
+                    self.activation_function,
+                )
+                for _ in range(num_routed_experts)
+            ]
         )
 
         if num_shared_experts < 0:
@@ -150,7 +166,15 @@ class RoutedMoENLIModel(nn.Module):
             )
         self.num_shared_experts = num_shared_experts
         self.shared_experts = nn.ModuleList(
-            [FeedForwardExpert(hidden_dim, expert_ffn_dim, dropout) for _ in range(num_shared_experts)]
+            [
+                FeedForwardExpert(
+                    hidden_dim,
+                    expert_ffn_dim,
+                    dropout,
+                    self.activation_function,
+                )
+                for _ in range(num_shared_experts)
+            ]
         )
 
         self.output_norm = nn.LayerNorm(hidden_dim)

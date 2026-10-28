@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 
 from ..data.config import DEFAULT_LABEL_MAPPING
 from ..models.common.contrastive import NLIRelationContrastiveLoss
+from ..models.common.expert import normalize_expert_activation
 from ..models.common.invariance import CrossModalNLIInvarianceLoss
 from ..models.common.losses import compute_mode_auxiliary_loss
 from ..models.common.routing_utils import compute_routing_statistics
@@ -232,6 +233,14 @@ class Trainer:
         self.config = config
         self.routing_strategy = getattr(model, "routing_strategy", None)
         self.mode_evidence_stage = getattr(model, "mode_evidence_stage", None)
+        self.activation_function = getattr(model, "activation_function", None)
+        if self.activation_function is not None:
+            configured_activation = self._activation_function_from_config(config)
+            if configured_activation != self.activation_function:
+                raise ValueError(
+                    f"Config activation function {configured_activation!r} does not "
+                    f"match model activation function {self.activation_function!r}."
+                )
         self.detach_post_moe_evidence_from_backbone = getattr(
             model,
             "detach_post_moe_evidence_from_backbone",
@@ -366,10 +375,11 @@ class Trainer:
         if self.mode_evidence_stage is not None:
             self.logger.info(
                 "ARCHITECTURE | routing_strategy=%s | mode_evidence_stage=%s | "
-                "detach_post_moe_evidence_from_backbone=%s",
+                "detach_post_moe_evidence_from_backbone=%s | activation_function=%s",
                 self.routing_strategy,
                 self.mode_evidence_stage,
                 str(self.detach_post_moe_evidence_from_backbone).lower(),
+                self.activation_function,
             )
         self.logger.info(
             "PARAMETERS | total=%d | trainable=%d",
@@ -579,6 +589,7 @@ class Trainer:
         checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
         self._validate_checkpoint_routing_strategy(checkpoint)
         self._validate_checkpoint_mode_evidence_stage(checkpoint)
+        self._validate_checkpoint_activation_function(checkpoint)
         self.model.load_state_dict(checkpoint["model_state_dict"], strict=True)
         selection_metric, selection_mode = self._checkpoint_selection_metadata(
             checkpoint
@@ -722,6 +733,10 @@ class Trainer:
             )
         return stage
 
+    @staticmethod
+    def _activation_function_from_config(config: dict[str, Any]) -> str:
+        return normalize_expert_activation(config.get("activation_function", "gelu"))
+
     def _validate_checkpoint_routing_strategy(
         self,
         checkpoint: dict[str, Any],
@@ -757,6 +772,27 @@ class Trainer:
             raise ValueError(
                 f"Checkpoint mode evidence stage {checkpoint_stage!r} does not "
                 f"match model mode evidence stage {self.mode_evidence_stage!r}."
+            )
+
+    def _validate_checkpoint_activation_function(
+        self,
+        checkpoint: dict[str, Any],
+    ) -> None:
+        if self.activation_function is None:
+            return
+        checkpoint_config = checkpoint.get("config")
+        if not isinstance(checkpoint_config, dict):
+            raise ValueError(
+                "Checkpoint is missing config metadata required to validate "
+                "the expert activation function."
+            )
+        checkpoint_activation = self._activation_function_from_config(
+            checkpoint_config
+        )
+        if checkpoint_activation != self.activation_function:
+            raise ValueError(
+                f"Checkpoint activation function {checkpoint_activation!r} does "
+                f"not match model activation function {self.activation_function!r}."
             )
 
     def _build_logger(self) -> logging.Logger:

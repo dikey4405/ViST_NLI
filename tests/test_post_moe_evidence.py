@@ -382,6 +382,7 @@ class TestPostMoEEvidenceIntegration(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("mode_evidence_stage=post_moe", log_text)
+            self.assertIn("activation_function=gelu", log_text)
             self.assertIn(
                 "detach_post_moe_evidence_from_backbone=true",
                 log_text,

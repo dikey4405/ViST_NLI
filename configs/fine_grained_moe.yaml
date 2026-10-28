@@ -6,6 +6,7 @@ num_routed_experts: 8
 num_shared_experts: 0
 routed_top_k: 4
 expert_ffn_dim: 1024
+activation_function: gelu
 num_labels: 3
 dropout: 0.2
 
