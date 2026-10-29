@@ -1,7 +1,7 @@
 model_name: deepseek_moe
 input_dim: 4096
 num_modes: 4
-hidden_dim: 2048
+hidden_dim: 1024
 num_routed_experts: 8
 num_shared_experts: 1
 routed_top_k: 3
@@ -44,7 +44,7 @@ batch_size: 16
 num_workers: 1
 num_epochs: 30
 learning_rate: 0.00005
-weight_decay: 0.03
+weight_decay: 0.01
 label_smoothing: 0.0
 scheduler_name: cosine_with_warmup
 scheduler_warmup_ratio: 0.03
