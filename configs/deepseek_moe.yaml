@@ -6,7 +6,7 @@ num_routed_experts: 8
 num_shared_experts: 1
 routed_top_k: 3
 expert_ffn_dim: 1024
-activation_function: swiglu
+activation_function: gelu
 num_labels: 3
 dropout: 0.2
 
@@ -44,7 +44,7 @@ batch_size: 16
 num_workers: 1
 num_epochs: 30
 learning_rate: 0.00005
-weight_decay: 0.01
+weight_decay: 0.03
 label_smoothing: 0.0
 scheduler_name: cosine_with_warmup
 scheduler_warmup_ratio: 0.03
