@@ -4,7 +4,7 @@ num_modes: 4
 hidden_dim: 2048
 num_routed_experts: 8
 num_shared_experts: 4
-routed_top_k: 3
+routed_top_k: 2
 expert_ffn_dim: 1024
 activation_function: gelu
 num_labels: 3
