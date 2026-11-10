@@ -2,9 +2,9 @@ model_name: deepseek_moe
 input_dim: 4096
 num_modes: 4
 hidden_dim: 2048
-num_routed_experts: 8
-num_shared_experts: 4
-routed_top_k: 2
+num_routed_experts: 16
+num_shared_experts: 8
+routed_top_k: 4
 expert_ffn_dim: 1024
 activation_function: gelu
 num_labels: 3
