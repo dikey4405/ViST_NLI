@@ -27,6 +27,7 @@ from .model_factory import build_model
 from .metrics import EpochMetrics, summarize_mode_values
 from .schedulers import build_lr_scheduler, resolve_scheduler_name
 from .utils import Timer, count_parameters, load_yaml_config, resolve_path, set_random_seed
+from .visualization import plot_loss_curves, save_confusion_artifacts
 
 
 SELECTION_METRIC = "macro_f1"
@@ -313,6 +314,9 @@ class Trainer:
         self.run_id = create_run_id()
         self.metrics_history_path = self.output_dir / "metrics_history.jsonl"
         self.logger = self._build_logger()
+        self._plot_history: list[dict[str, Any]] = []
+        self._latest_confusion: torch.Tensor | None = None
+        self._best_dev_confusion: torch.Tensor | None = None
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=float(config["learning_rate"]),
@@ -340,6 +344,8 @@ class Trainer:
     def train(self) -> None:
         best_selection_score = float("-inf")
         epochs_without_improvement = 0
+        self._plot_history = []
+        self._best_dev_confusion = None
         num_epochs = int(self.config["num_epochs"])
         patience = int(self.config["patience"])
         if num_epochs < 1 or patience < 1:
@@ -391,6 +397,7 @@ class Trainer:
             for epoch in range(1, num_epochs + 1):
                 with Timer() as epoch_timer:
                     train_metrics = self._run_epoch(training=True)
+                    self._latest_confusion = None
                     dev_metrics = (
                         self._run_epoch(training=False)
                         if self.dev_loader is not None
@@ -404,6 +411,8 @@ class Trainer:
                 if is_best:
                     best_selection_score = selection_score
                     epochs_without_improvement = 0
+                    if dev_metrics and self._latest_confusion is not None:
+                        self._best_dev_confusion = self._latest_confusion.clone()
                     self._save_checkpoint(
                         "best_model.pt",
                         epoch,
@@ -429,23 +438,22 @@ class Trainer:
                     patience=patience,
                 ):
                     self.logger.info("%s", line)
-                append_jsonl(
-                    self.metrics_history_path,
-                    {
-                        "run_id": self.run_id,
-                        "epoch": epoch,
-                        "num_epochs": num_epochs,
-                        "epoch_time_seconds": epoch_timer.elapsed,
-                        "learning_rate": learning_rate,
-                        "is_best": is_best,
-                        "epochs_without_improvement": epochs_without_improvement,
-                        "selection_metric": SELECTION_METRIC,
-                        "selection_score": selection_score,
-                        "best_selection_score": best_selection_score,
-                        "train": train_metrics,
-                        "dev": dev_metrics,
-                    },
-                )
+                record = {
+                    "run_id": self.run_id,
+                    "epoch": epoch,
+                    "num_epochs": num_epochs,
+                    "epoch_time_seconds": epoch_timer.elapsed,
+                    "learning_rate": learning_rate,
+                    "is_best": is_best,
+                    "epochs_without_improvement": epochs_without_improvement,
+                    "selection_metric": SELECTION_METRIC,
+                    "selection_score": selection_score,
+                    "best_selection_score": best_selection_score,
+                    "train": train_metrics,
+                    "dev": dev_metrics,
+                }
+                append_jsonl(self.metrics_history_path, record)
+                self._plot_history.append(record)
 
                 if torch.cuda.is_available():
                     self.logger.info(
@@ -580,11 +588,14 @@ class Trainer:
 
             metrics.update(outputs, labels, losses)
 
-        return metrics.compute()
+        result = metrics.compute()
+        self._latest_confusion = metrics.confusion.clone()
+        return result
 
     def evaluate_test(self, loader: DataLoader) -> dict[str, Any]:
         """Evaluate held-out data once using the checkpoint selected only on dev."""
 
+        self._latest_confusion = None
         checkpoint_path = self.output_dir / "best_model.pt"
         checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
         self._validate_checkpoint_routing_strategy(checkpoint)
@@ -619,7 +630,51 @@ class Trainer:
         for line in format_split_metrics("TEST", report["metrics"]):
             self.logger.info("%s", line)
         self.logger.info("TEST OUTPUT | path=%s", self.output_dir / "test_metrics.json")
+        self._save_visualizations(best_epoch=int(report["best_epoch"]))
         return report
+
+    def _save_visualizations(self, *, best_epoch: int) -> None:
+        if self._plot_history:
+            paths = plot_loss_curves(
+                self._plot_history,
+                output_dir=self.output_dir,
+                run_id=self.run_id,
+                best_epoch=best_epoch,
+                logger=self.logger,
+            )
+            for path in paths:
+                self.logger.info("PLOT OUTPUT | path=%s", path)
+        else:
+            self.logger.warning(
+                "PLOT SKIPPED | no epoch history for run_id=%s", self.run_id
+            )
+
+        if self._best_dev_confusion is not None:
+            for path in save_confusion_artifacts(
+                self._best_dev_confusion,
+                split="dev",
+                output_dir=self.output_dir,
+                run_id=self.run_id,
+            ):
+                self.logger.info("PLOT OUTPUT | path=%s", path)
+        else:
+            self.logger.warning(
+                "PLOT SKIPPED | no best-epoch Dev confusion for run_id=%s",
+                self.run_id,
+            )
+
+        if self._latest_confusion is not None:
+            for path in save_confusion_artifacts(
+                self._latest_confusion,
+                split="test",
+                output_dir=self.output_dir,
+                run_id=self.run_id,
+            ):
+                self.logger.info("PLOT OUTPUT | path=%s", path)
+        else:
+            self.logger.warning(
+                "PLOT SKIPPED | no Test confusion for run_id=%s", self.run_id
+            )
 
     def close(self) -> None:
         for handler in list(self.logger.handlers):
