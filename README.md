@@ -224,6 +224,15 @@ available main, auxiliary, mode, fusion, and routing metrics by epoch and split.
 `metrics_history.jsonl` stores one complete machine-readable record after every
 epoch so interrupted and consecutive runs retain their history. Both log files
 use append mode, and a unique `run_id` identifies each training invocation.
+After the selected checkpoint is evaluated on Test, the trainer writes
+`loss_total_<run_id>.png`, `loss_classification_<run_id>.png`, and count and
+row-percentage confusion matrices for Dev and Test directly beside `train.log`.
+The count matrices are also saved as `confusion_matrix_{dev,test}_<run_id>.csv`
+in entailment, neutral, contradiction label-ID order. The Dev matrix comes
+from the best-macro-F1 epoch, while the Test matrix comes from the existing
+best-checkpoint evaluation; plotting does not rerun inference. PNGs use a
+headless Matplotlib backend at 300 DPI. Missing Dev data are warned about and
+never imputed. Figures from successive runs remain separated by `run_id`.
 The test report includes the selected epoch, selection metric and score, feature
 source, and number of test samples. Test results do not participate in checkpoint
 selection or early stopping.
