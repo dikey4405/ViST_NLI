@@ -10,10 +10,10 @@ activation_function: gelu
 num_labels: 3
 dropout: 0.2
 
-use_relation_contrastive_loss: true
+use_relation_contrastive_loss: false
 alignment_hidden_dim: 512
 relation_contrastive_margin: 0.5
-relation_contrastive_loss_coef: 0.1
+relation_contrastive_loss_coef: 0.0
 
 routing_strategy: counterfactual_utility
 mode_evidence_stage: pre_moe
@@ -33,7 +33,7 @@ reliability_weighted_invariance: false
 counterfactual_routing_loss_coef: 0.0
 detach_utility_from_input_projection: false
 
-aux_loss_coef: 0.0
+aux_loss_coef: 0.01
 
 fusion_modality_dropout_enabled: false
 fusion_drop_tt_prob: 0.00
