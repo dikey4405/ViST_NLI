@@ -25,10 +25,10 @@ detach_reliability_for_fusion: true
 mode_embedding_dim: 32
 reliability_embedding_dim: 16
 
-use_mode_auxiliary_loss: false
-mode_auxiliary_loss_coef: 0.0
-use_invariance_loss: true
-invariance_loss_coef: 0.1
+use_mode_auxiliary_loss: true
+mode_auxiliary_loss_coef: 0.2
+use_invariance_loss: false
+invariance_loss_coef: 0.0
 reliability_weighted_invariance: false
 counterfactual_routing_loss_coef: 0.0
 detach_utility_from_input_projection: false
