@@ -1,7 +1,7 @@
 model_name: fine_grained_moe
 input_dim: 4096
 num_modes: 4
-hidden_dim: 1024
+hidden_dim: 2048
 num_routed_experts: 8
 num_shared_experts: 0
 routed_top_k: 4
