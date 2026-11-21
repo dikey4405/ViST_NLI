@@ -15,10 +15,10 @@ alignment_hidden_dim: 512
 relation_contrastive_margin: 0.5
 relation_contrastive_loss_coef: 0.1
 
-routing_strategy: reliability
-mode_evidence_stage: pre_moe
+routing_strategy: counterfactual_utility
+mode_evidence_stage: pre-moe
 detach_post_moe_evidence_from_backbone: false
-use_reliability_routing: true
+use_reliability_routing: false
 use_reliability_fusion: true
 reliability_estimator: entropy
 detach_reliability_for_fusion: true
@@ -33,7 +33,7 @@ reliability_weighted_invariance: false
 counterfactual_routing_loss_coef: 0.0
 detach_utility_from_input_projection: false
 
-aux_loss_coef: 0.01
+aux_loss_coef: 0.0
 
 fusion_modality_dropout_enabled: false
 fusion_drop_tt_prob: 0.00
