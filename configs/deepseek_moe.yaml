@@ -8,7 +8,7 @@ routed_top_k: 3
 expert_ffn_dim: 1024
 activation_function: gelu
 num_labels: 3
-dropout: 0.2
+dropout: 0.3
 
 use_relation_contrastive_loss: true
 alignment_hidden_dim: 512
@@ -43,7 +43,7 @@ seed: 42
 batch_size: 16
 num_workers: 1
 num_epochs: 30
-learning_rate: 0.0005
+learning_rate: 0.00005
 weight_decay: 0.01
 label_smoothing: 0.0
 scheduler_name: cosine_with_warmup
