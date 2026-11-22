@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import tempfile
 import unittest
@@ -206,6 +207,15 @@ class TestTrainerLogging(unittest.TestCase):
             self.assertIn("best_selection_score", test_report)
             self.assertNotIn("best_dev_loss", test_report)
             self.assertTrue((output_dir / "test_metrics.json").is_file())
+            self.assertEqual(len(list(output_dir.glob(f"*_{first_run_id}.png"))), 7)
+            self.assertTrue((output_dir / f"training_dynamics_{first_run_id}.png").is_file())
+            self.assertEqual(len(list(output_dir.glob(f"*_{first_run_id}.csv"))), 2)
+            with (output_dir / f"confusion_matrix_test_{first_run_id}.csv").open(
+                newline="", encoding="utf-8"
+            ) as file:
+                rows = list(csv.reader(file))
+            self.assertEqual(sum(int(value) for row in rows[1:] for value in row[1:]), 3)
+            self.assertIn("PLOT OUTPUT | path=", log_text)
 
             checkpoint = torch.load(
                 output_dir / "best_model.pt",
@@ -219,6 +229,7 @@ class TestTrainerLogging(unittest.TestCase):
             second_run_id = second_trainer.run_id
             try:
                 second_trainer.train()
+                second_trainer.evaluate_test(second_trainer.train_loader)
             finally:
                 second_trainer.close()
 
@@ -226,6 +237,96 @@ class TestTrainerLogging(unittest.TestCase):
             self.assertEqual(len(all_records), 3)
             self.assertNotEqual(first_run_id, second_run_id)
             self.assertEqual(all_records[-1]["run_id"], second_run_id)
+            self.assertEqual(len(list(output_dir.glob(f"*_{first_run_id}.png"))), 7)
+            self.assertEqual(len(list(output_dir.glob(f"*_{second_run_id}.png"))), 7)
+
+    def test_best_dev_confusion_comes_from_selected_epoch_without_extra_forward(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            feature_path = root / "features.pt"
+            output_dir = root / "output"
+            torch.save(_feature_payload(), feature_path)
+            trainer = _build_trainer(
+                feature_path, output_dir, num_epochs=5, patience=1
+            )
+            dev_best = torch.eye(3, dtype=torch.long)
+            dev_other = torch.tensor([[1, 0, 0], [1, 0, 0], [0, 0, 1]])
+            test_confusion = torch.tensor([[0, 1, 0], [0, 1, 0], [0, 0, 1]])
+            reports = [
+                _scripted_metrics(total_loss=1.0, macro_f1=0.4),
+                _scripted_metrics(total_loss=0.9, macro_f1=0.55),
+                _scripted_metrics(total_loss=0.8, macro_f1=0.5),
+                _scripted_metrics(total_loss=1.2, macro_f1=1.0),
+                _scripted_metrics(total_loss=0.7, macro_f1=0.6),
+                _scripted_metrics(total_loss=0.7, macro_f1=0.55),
+                _scripted_metrics(total_loss=0.7, macro_f1=0.55),
+            ]
+            call_count = 0
+
+            def scripted_epoch(*, training: bool, loader=None) -> dict[str, float]:
+                nonlocal call_count
+                index = call_count
+                call_count += 1
+                if not training:
+                    trainer._latest_confusion = (
+                        dev_best if index == 3 else
+                        test_confusion if loader is not None else dev_other
+                    ).clone()
+                return reports[index]
+
+            trainer._run_epoch = scripted_epoch
+            run_id = trainer.run_id
+            try:
+                trainer.train()
+                trainer.evaluate_test(trainer.train_loader)
+            finally:
+                trainer.close()
+
+            checkpoint = torch.load(
+                output_dir / "best_model.pt", map_location="cpu", weights_only=False
+            )
+            history = _read_jsonl(output_dir / "metrics_history.jsonl")
+            with (output_dir / f"confusion_matrix_dev_{run_id}.csv").open(
+                newline="", encoding="utf-8"
+            ) as file:
+                dev_rows = list(csv.reader(file))
+            with (output_dir / f"confusion_matrix_test_{run_id}.csv").open(
+                newline="", encoding="utf-8"
+            ) as file:
+                test_rows = list(csv.reader(file))
+            log_text = (output_dir / "train.log").read_text(encoding="utf-8")
+            image_count = len(list(output_dir.glob(f"*_{run_id}.png")))
+
+        self.assertEqual(call_count, 7)
+        self.assertEqual(checkpoint["epoch"], 2)
+        self.assertEqual([row[1:] for row in dev_rows[1:]], [
+            ["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]
+        ])
+        self.assertEqual([row[1:] for row in test_rows[1:]], [
+            ["0", "1", "0"], ["0", "1", "0"], ["0", "0", "1"]
+        ])
+        self.assertEqual(len(history), 3)
+        self.assertIn("EARLY STOPPING | epoch=3", log_text)
+        self.assertEqual(image_count, 7)
+
+    def test_no_dev_loader_warns_and_never_creates_dev_confusion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            feature_path = root / "features.pt"
+            output_dir = root / "output"
+            torch.save(_feature_payload(), feature_path)
+            trainer = _build_trainer(feature_path, output_dir, num_epochs=1)
+            trainer.dev_loader = None
+            run_id = trainer.run_id
+            try:
+                trainer.train()
+                trainer.evaluate_test(trainer.train_loader)
+            finally:
+                trainer.close()
+            log_text = (output_dir / "train.log").read_text(encoding="utf-8")
+            self.assertEqual(len(list(output_dir.glob(f"*_{run_id}.png"))), 5)
+            self.assertFalse((output_dir / f"confusion_matrix_dev_{run_id}.csv").exists())
+            self.assertIn("no best-epoch Dev confusion", log_text)
 
     def test_scheduler_steps_only_for_training_and_is_checkpointed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

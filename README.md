@@ -225,8 +225,13 @@ available main, auxiliary, mode, fusion, and routing metrics by epoch and split.
 epoch so interrupted and consecutive runs retain their history. Both log files
 use append mode, and a unique `run_id` identifies each training invocation.
 After the selected checkpoint is evaluated on Test, the trainer writes
-`loss_total_<run_id>.png`, `loss_classification_<run_id>.png`, and count and
-row-percentage confusion matrices for Dev and Test directly beside `train.log`.
+`loss_total_<run_id>.png`, `loss_classification_<run_id>.png`,
+`training_dynamics_<run_id>.png`, and count and row-percentage confusion
+matrices for Dev and Test directly beside `train.log`. The first two figures
+show Train/Dev loss above the recorded epoch-end learning rate; the combined
+figure also shows Dev macro-F1 as a percentage. The LR trace has one point per
+epoch, so it does not resolve optimizer-step warmup within an epoch. Missing
+observations are left as gaps, not interpolated.
 The count matrices are also saved as `confusion_matrix_{dev,test}_<run_id>.csv`
 in entailment, neutral, contradiction label-ID order. The Dev matrix comes
 from the best-macro-F1 epoch, while the Test matrix comes from the existing
