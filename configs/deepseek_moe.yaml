@@ -2,8 +2,8 @@ model_name: deepseek_moe
 input_dim: 4096
 num_modes: 4
 hidden_dim: 2048
-num_routed_experts: 16
-num_shared_experts: 2
+num_routed_experts: 8
+num_shared_experts: 1
 routed_top_k: 3
 expert_ffn_dim: 1024
 activation_function: gelu
@@ -43,7 +43,7 @@ seed: 42
 batch_size: 16
 num_workers: 1
 num_epochs: 30
-learning_rate: 0.00005
+learning_rate: 0.0001
 weight_decay: 0.01
 label_smoothing: 0.0
 scheduler_name: cosine_with_warmup
