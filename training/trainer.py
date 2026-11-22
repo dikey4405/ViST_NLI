@@ -27,7 +27,11 @@ from .model_factory import build_model
 from .metrics import EpochMetrics, summarize_mode_values
 from .schedulers import build_lr_scheduler, resolve_scheduler_name
 from .utils import Timer, count_parameters, load_yaml_config, resolve_path, set_random_seed
-from .visualization import plot_loss_curves, save_confusion_artifacts
+from .visualization import (
+    plot_loss_curves,
+    plot_training_dynamics,
+    save_confusion_artifacts,
+)
 
 
 SELECTION_METRIC = "macro_f1"
@@ -644,6 +648,15 @@ class Trainer:
             )
             for path in paths:
                 self.logger.info("PLOT OUTPUT | path=%s", path)
+            dynamics_path = plot_training_dynamics(
+                self._plot_history,
+                output_dir=self.output_dir,
+                run_id=self.run_id,
+                best_epoch=best_epoch,
+                logger=self.logger,
+            )
+            if dynamics_path is not None:
+                self.logger.info("PLOT OUTPUT | path=%s", dynamics_path)
         else:
             self.logger.warning(
                 "PLOT SKIPPED | no epoch history for run_id=%s", self.run_id
